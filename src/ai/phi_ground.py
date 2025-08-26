@@ -162,10 +162,11 @@ class PhiGroundActionGenerator:
                             **strategy['kwargs']
                         )
                     
-                    # Move to CPU if using CPU fallback strategy
-                    if strategy['name'] == "CPU Fallback":
+                    # Move to CPU if using CPU strategy
+                    if strategy['name'] == "Fast CPU Loading":
                         self.device = "cpu"
                         self.model = self.model.to("cpu")
+                        logger.info("Model moved to CPU for Fast CPU Loading strategy")
                     
                     logger.info(f"Phi Ground model initialized successfully with {strategy['name']}")
                     break
@@ -303,7 +304,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                             **processed_image,
                             padding=True,
                             truncation=True
-                        ).to(self.device)
+                        )
+                        # Move to correct device
+                        vision_inputs = {k: v.to(self.device) for k, v in vision_inputs.items()}
                         logger.info("Vision tokenization successful with AutoImageProcessor")
                     except Exception as e1:
                         logger.debug(f"AutoImageProcessor approach failed: {e1}")
@@ -318,7 +321,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                     **processed_image,
                                     padding=True,
                                     truncation=True
-                                ).to(self.device)
+                                )
+                                # Move to correct device
+                                vision_inputs = {k: v.to(self.device) for k, v in vision_inputs.items()}
                                 logger.info("Vision tokenization successful with model's image processor")
                         except Exception as e2:
                             logger.debug(f"Model image processor approach failed: {e2}")
@@ -336,7 +341,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                         return_tensors="pt",
                         padding=True,
                         truncation=True
-                    ).to(self.device)
+                    )
+                    # Move to correct device
+                    inputs = {k: v.to(self.device) for k, v in inputs.items()}
             else:
                 # Use text-only tokenization with proper attention mask
                 logger.info("Using text-only tokenization (no screenshot processing)")
@@ -345,26 +352,29 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     return_tensors="pt",
                     padding=True,
                     truncation=True
-                ).to(self.device)
+                )
+                # Move to correct device
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
             # Generate response with robust caching fixes
             with torch.no_grad():
                 generation_success = False
                 
-                # Strategy 1: Try with minimal parameters first (most reliable)
+                # Strategy 1: Try with simple generation (most reliable)
                 try:
-                    logger.info("Trying minimal generation strategy")
+                    logger.info("Trying simple generation strategy")
                     outputs = self.model.generate(
                         input_ids=inputs.get('input_ids'),
                         max_new_tokens=256,
                         do_sample=False,
                         pad_token_id=self.tokenizer.eos_token_id,
-                        use_cache=False
+                        use_cache=False,
+                        return_dict_in_generate=False
                     )
                     generation_success = True
-                    logger.info("Minimal generation successful")
+                    logger.info("Simple generation successful")
                 except Exception as e:
-                    logger.warning(f"Minimal generation failed: {e}")
+                    logger.warning(f"Simple generation failed: {e}")
                 
                 # Strategy 2: Try with basic parameters
                 if not generation_success:
@@ -408,6 +418,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                         # Get the last token and generate one token at a time
                         current_input = inputs.get('input_ids')
                         generated_tokens = []
+                        
+                        # Ensure input is on the same device as model
+                        current_input = current_input.to(self.device)
                         
                         for _ in range(256):
                             with torch.no_grad():
