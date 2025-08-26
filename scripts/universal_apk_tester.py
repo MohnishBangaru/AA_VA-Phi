@@ -31,7 +31,7 @@ from scripts.final_report_generator import AppState, FinalReportGenerator, LLMEv
 
 
 class UniversalAPKTester:
-    """Universal APK testing with DroidBot-GPT + VisionAI integration."""
+    """Universal APK testing with Explorer-GPT + VisionAI integration."""
     
     def __init__(self, apk_path: str, num_actions: int = 10, output_dir: str = "universal_reports", 
                  screenshot_frequency: str = "adaptive", max_screenshots_per_action: int = 3,
