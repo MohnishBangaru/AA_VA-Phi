@@ -155,7 +155,7 @@ async def take_screenshot(request: ScreenshotRequest):
             # Compress the screenshot data to reduce transmission size
             compressed_data = gzip.compress(result['stdout'])
             screenshot_data = base64.b64encode(compressed_data).decode('utf-8')
-            logger.info(f"Original size: {len(result['stdout'])}, Compressed base64 length: {len(screenshot_data)}")
+            logger.info(f"Screenshot compressed: {len(result['stdout'])} -> {len(screenshot_data)} bytes")
             
             response_data = {
                 'output_path': output_path, 
@@ -164,16 +164,8 @@ async def take_screenshot(request: ScreenshotRequest):
                 'compressed': True
             }
             
-            logger.info(f"Screenshot response data keys: {list(response_data.keys())}")
-            logger.info(f"Screenshot taken successfully: {output_path}, size: {len(result['stdout'])} bytes")
-            
-            response = ADBResponse(
-                success=True,
-                data=response_data
-            )
-            logger.info(f"ADBResponse created with data keys: {list(response.data.keys()) if response.data else 'None'}")
-            logger.info(f"ADBResponse screenshot_data present: {'screenshot_data' in response.data if response.data else False}")
-            return response
+            logger.info(f"Screenshot saved: {output_path} ({len(result['stdout'])} bytes)")
+            return ADBResponse(success=True, data=response_data)
         except Exception as e:
             logger.error(f"Screenshot save failed: {e}")
             return ADBResponse(success=False, error=str(e))

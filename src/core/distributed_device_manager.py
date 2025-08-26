@@ -113,15 +113,13 @@ class DistributedDeviceManager:
                 import base64
                 import gzip
                 
-                logger.info(f"Using base64 screenshot data, length: {len(screenshot_data)}")
                 decoded_data = base64.b64decode(screenshot_data)
                 
                 # Check if data is compressed
                 if response.get("data", {}).get("compressed", False):
-                    logger.info("Decompressing screenshot data")
                     decoded_data = gzip.decompress(decoded_data)
                 
-                logger.info(f"Final screenshot data size: {len(decoded_data)} bytes")
+                logger.info(f"Screenshot received: {len(decoded_data)} bytes")
                 return decoded_data
             else:
                 # If no base64 data, try to read the file and return bytes
