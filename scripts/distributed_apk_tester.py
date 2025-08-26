@@ -47,14 +47,15 @@ class DistributedAPKTester:
         self.apk_path = apk_path
         self.local_server_url = local_server_url
         
-        # Use local directory for saving results (on laptop, not RunPod)
+        # Use specified local directory for saving results (on laptop, not RunPod)
         if output_dir.startswith("http"):
-            # If using tunnel URL, save to local directory
-            self.output_dir = Path("local_test_reports")
+            # If using tunnel URL, save to specified local directory
+            self.output_dir = Path("/Users/mohnishbangaru/Drizz/local_test_reports")
         else:
+            # Use the specified output directory
             self.output_dir = Path(output_dir)
         
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(exist_ok=True, parents=True)
         
         # Initialize components
         self.device_manager = None
@@ -323,7 +324,7 @@ async def main():
     parser = argparse.ArgumentParser(description="Distributed Universal APK Tester")
     parser.add_argument("--apk", required=True, help="Path to APK file")
     parser.add_argument("--local-server", required=True, help="Local ADB server URL (e.g., http://192.168.1.100:8000)")
-    parser.add_argument("--output-dir", default="test_reports", help="Output directory for results")
+    parser.add_argument("--output-dir", default="/Users/mohnishbangaru/Drizz/local_test_reports", help="Output directory for results")
     parser.add_argument("--actions", type=int, default=10, help="Number of actions to perform")
     
     args = parser.parse_args()

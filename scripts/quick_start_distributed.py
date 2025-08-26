@@ -188,6 +188,8 @@ def print_setup_instructions(local_ip: str):
        --apk /path/to/app.apk \\
        --local-server {local_ip} \\
        --actions 10
+   
+   Results will be saved to: /Users/mohnishbangaru/Drizz/local_test_reports/
 
 📚 For detailed instructions, see: DISTRIBUTED_SETUP_GUIDE.md
 """)
