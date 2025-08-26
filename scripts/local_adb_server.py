@@ -271,8 +271,12 @@ async def get_foreground_app():
 
 
 @app.post("/shell", response_model=ADBResponse)
-async def execute_shell_command(command: str):
+async def execute_shell_command(request: dict):
     """Execute shell command on device."""
+    command = request.get('command', '')
+    if not command:
+        return ADBResponse(success=False, error="No command provided")
+    
     result = run_adb_command(['shell'] + command.split())
     
     if result['success']:
