@@ -70,8 +70,17 @@ python scripts/local_adb_server.py --host 0.0.0.0 --port 8000
 
 ## 🔧 Step 4: Configure RunPod
 
-### Create Configuration File
-On RunPod, create `distributed_config.env`:
+### Create Minimal Configuration (Recommended)
+On RunPod, create a minimal configuration that doesn't require API keys:
+
+```bash
+# On RunPod
+cd /workspace/AA_VA-Phi
+python scripts/runpod_minimal_config.py
+```
+
+### Create Custom Configuration (Optional)
+If you want to customize settings, create `distributed_config.env`:
 
 ```bash
 # On RunPod
@@ -166,6 +175,20 @@ pip install python-dotenv pydantic-settings fastapi uvicorn aiohttp requests
 
 # Or install all requirements
 pip install -r requirements.txt
+```
+
+#### 4. Configuration Errors
+**Problem**: `ValidationError: openai_api_key Field required`
+**Solution**:
+```bash
+# Create minimal configuration (recommended)
+python scripts/runpod_minimal_config.py
+
+# Or set up API keys interactively
+python scripts/setup_api_keys.py
+
+# Or manually create .env file
+echo "OPENAI_API_KEY=" > .env
 ```
 
 #### 4. ADB Device Not Found

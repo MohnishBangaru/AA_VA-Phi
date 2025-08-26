@@ -14,7 +14,7 @@ class Config(BaseSettings):
     """Configuration class for DroidBot-GPT framework."""
     
     # OpenAI Configuration
-    openai_api_key: str = Field(...)
+    openai_api_key: str = Field(default="", description="OpenAI API key (optional for basic functionality)")
     openai_model: str = Field(default="gpt-4")
     openai_max_tokens: int = Field(default=2000)
     openai_temperature: float = Field(default=0.7)
@@ -87,9 +87,6 @@ class Config(BaseSettings):
     
     def validate_config(self) -> bool:
         """Validate configuration values."""
-        if not self.openai_api_key or self.openai_api_key == "your_openai_api_key_here":
-            raise ValueError("OpenAI API key is required")
-        
         if self.cv_confidence_threshold < 0 or self.cv_confidence_threshold > 1:
             raise ValueError("CV confidence threshold must be between 0 and 1")
         
@@ -114,4 +111,9 @@ class Config(BaseSettings):
 
 
 # Global configuration instance
-config = Config()
+try:
+    config = Config()
+except Exception as e:
+    print(f"Warning: Could not load configuration: {e}")
+    # Create a minimal config for basic functionality
+    config = Config(openai_api_key="")
