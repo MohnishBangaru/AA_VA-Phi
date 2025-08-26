@@ -150,17 +150,22 @@ async def take_screenshot(request: ScreenshotRequest):
             import base64
             screenshot_data = base64.b64encode(result['stdout']).decode('utf-8')
             
+            response_data = {
+                'output_path': output_path, 
+                'size': len(result['stdout']),
+                'screenshot_data': screenshot_data
+            }
+            
+            logger.info(f"Screenshot taken successfully: {output_path}, size: {len(result['stdout'])} bytes")
             return ADBResponse(
                 success=True,
-                data={
-                    'output_path': output_path, 
-                    'size': len(result['stdout']),
-                    'screenshot_data': screenshot_data
-                }
+                data=response_data
             )
         except Exception as e:
+            logger.error(f"Screenshot save failed: {e}")
             return ADBResponse(success=False, error=str(e))
     else:
+        logger.error(f"Screenshot capture failed: {result['error']}")
         return ADBResponse(success=False, error=result['error'])
 
 
