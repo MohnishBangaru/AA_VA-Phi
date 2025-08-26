@@ -104,8 +104,6 @@ class DistributedDeviceManager:
         
         response = self._make_request("POST", "/screenshot", json=request_data)
         
-        logger.info(f"Screenshot response: {response}")
-        
         if response.get("success", False):
             # Return screenshot data as bytes
             screenshot_data = response.get("data", {}).get("screenshot_data")
@@ -119,23 +117,20 @@ class DistributedDeviceManager:
                 if response.get("data", {}).get("compressed", False):
                     decoded_data = gzip.decompress(decoded_data)
                 
-                logger.info(f"Screenshot received: {len(decoded_data)} bytes")
                 return decoded_data
             else:
                 # If no base64 data, try to read the file and return bytes
                 file_path = response.get("data", {}).get("output_path")
-                logger.info(f"No base64 data, trying file path: {file_path}")
                 if file_path and Path(file_path).exists():
                     try:
                         with open(file_path, 'rb') as f:
                             data = f.read()
-                            logger.info(f"Read {len(data)} bytes from file")
                             return data
                     except Exception as e:
                         logger.error(f"Failed to read screenshot file {file_path}: {e}")
                         return None
                 else:
-                    logger.error(f"No screenshot data or file path available. Response data: {response.get('data', {})}")
+                    logger.error(f"No screenshot data or file path available")
                     return None
         else:
             logger.error(f"Failed to take screenshot: {response.get('error')}")

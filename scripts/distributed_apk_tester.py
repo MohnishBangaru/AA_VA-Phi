@@ -242,7 +242,6 @@ class DistributedAPKTester:
             
             # Take final screenshot
             final_screenshot = self.device_manager.take_screenshot()
-            logger.info(f"Final screenshot type: {type(final_screenshot)}")
             if final_screenshot:
                 screenshot_path = await self._save_screenshot_locally(final_screenshot, "final_screenshot.png")
                 if screenshot_path:
@@ -341,7 +340,6 @@ class DistributedAPKTester:
             screenshot_path = self.output_dir / filename
             with open(screenshot_path, 'wb') as f:
                 f.write(screenshot_data)
-            logger.info(f"Screenshot saved: {screenshot_path}")
             return str(screenshot_path)
         except Exception as e:
             logger.error(f"Failed to save screenshot: {e}")
