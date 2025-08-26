@@ -259,24 +259,29 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     return_tensors="pt"
                 ).to(self.device)
             
-            # Generate response with caching fixes
+            # Generate response with robust caching fixes
             with torch.no_grad():
+                generation_success = False
+                
+                # Strategy 1: Try with minimal parameters first (most reliable)
                 try:
-                    # Try with full inputs first
+                    logger.info("Trying minimal generation strategy")
                     outputs = self.model.generate(
-                        **inputs,
+                        input_ids=inputs.get('input_ids'),
                         max_new_tokens=256,
-                        temperature=0.7,
-                        do_sample=True,
+                        do_sample=False,
                         pad_token_id=self.tokenizer.eos_token_id,
-                        use_cache=True
+                        use_cache=False
                     )
+                    generation_success = True
+                    logger.info("Minimal generation successful")
                 except Exception as e:
-                    logger.warning(f"Model generation failed with full inputs: {e}")
-                    
-                    # Fallback to basic generation without cache
+                    logger.warning(f"Minimal generation failed: {e}")
+                
+                # Strategy 2: Try with basic parameters
+                if not generation_success:
                     try:
-                        logger.info("Falling back to basic generation without cache")
+                        logger.info("Trying basic generation strategy")
                         outputs = self.model.generate(
                             input_ids=inputs.get('input_ids'),
                             attention_mask=inputs.get('attention_mask'),
@@ -286,18 +291,54 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                             pad_token_id=self.tokenizer.eos_token_id,
                             use_cache=False
                         )
-                    except Exception as e2:
-                        logger.warning(f"Basic generation failed: {e2}")
-                        
-                        # Final fallback with minimal parameters
-                        logger.info("Using minimal generation parameters")
+                        generation_success = True
+                        logger.info("Basic generation successful")
+                    except Exception as e:
+                        logger.warning(f"Basic generation failed: {e}")
+                
+                # Strategy 3: Try with full parameters (least reliable)
+                if not generation_success:
+                    try:
+                        logger.info("Trying full generation strategy")
                         outputs = self.model.generate(
-                            input_ids=inputs.get('input_ids'),
+                            **inputs,
                             max_new_tokens=256,
-                            do_sample=False,
+                            temperature=0.7,
+                            do_sample=True,
                             pad_token_id=self.tokenizer.eos_token_id,
-                            use_cache=False
+                            use_cache=False  # Disable cache to avoid DynamicCache issues
                         )
+                        generation_success = True
+                        logger.info("Full generation successful")
+                    except Exception as e:
+                        logger.warning(f"Full generation failed: {e}")
+                
+                # Strategy 4: Ultimate fallback - direct forward pass
+                if not generation_success:
+                    try:
+                        logger.info("Using direct forward pass fallback")
+                        # Get the last token and generate one token at a time
+                        current_input = inputs.get('input_ids')
+                        generated_tokens = []
+                        
+                        for _ in range(256):
+                            with torch.no_grad():
+                                outputs = self.model.forward(input_ids=current_input)
+                                next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1)
+                                generated_tokens.append(next_token.item())
+                                current_input = torch.cat([current_input, next_token.unsqueeze(0)], dim=1)
+                                
+                                # Stop if we hit the end token
+                                if next_token.item() == self.tokenizer.eos_token_id:
+                                    break
+                        
+                        # Combine original input with generated tokens
+                        outputs = torch.cat([inputs.get('input_ids'), torch.tensor([generated_tokens])], dim=1)
+                        generation_success = True
+                        logger.info("Direct forward pass successful")
+                    except Exception as e:
+                        logger.error(f"All generation strategies failed: {e}")
+                        return None
             
             # Decode response
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
