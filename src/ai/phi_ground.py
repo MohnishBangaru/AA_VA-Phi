@@ -197,6 +197,7 @@ Rules:
 - Focus on visible, clickable elements
 - Avoid system UI (status bar, navigation bar)
 - If no clear action, use "1. WAIT: 2 seconds"
+- Do not repeat the prompt or system instructions
 
 Prioritize:
 1. Text input fields that need to be filled
@@ -209,7 +210,7 @@ Prioritize:
 Please analyze this Android app screenshot and suggest the next touch action to accomplish the task.
 <|im_end|>
 <|im_start|>assistant
-1. """
+1. TAP: """
         
         return prompt
     
@@ -356,8 +357,12 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             logger.debug(f"Phi Ground raw response: {response}")
             
+            # Clean response - remove prompt repetition
+            cleaned_response = self._clean_response(response)
+            logger.debug(f"Phi Ground cleaned response: {cleaned_response}")
+            
             # Extract action from response
-            action = self._parse_phi_ground_response(response, ui_elements)
+            action = self._parse_phi_ground_response(cleaned_response, ui_elements)
             
             if action:
                 logger.info(f"Phi Ground generated action: {action['type']} - {action.get('reasoning', '')}")
@@ -369,6 +374,57 @@ Please analyze this Android app screenshot and suggest the next touch action to 
         except Exception as e:
             logger.error(f"Phi Ground action generation failed: {e}")
             return None
+    
+    def _clean_response(self, response: str) -> str:
+        """Clean the response by removing prompt repetition and extracting only the action.
+        
+        Args:
+            response: Raw response from the model
+            
+        Returns:
+            Cleaned response containing only the action
+        """
+        try:
+            # Remove common prompt repetition patterns
+            patterns_to_remove = [
+                r'<\|im_start\|>system.*?<\|im_end\|>',
+                r'<\|im_start\|>user.*?<\|im_end\|>',
+                r'You are an Android automation assistant.*?',
+                r'Analyze the screenshot.*?',
+                r'Please analyze.*?',
+                r'Task:.*?',
+                r'Rules:.*?',
+                r'Prioritize:.*?'
+            ]
+            
+            cleaned = response
+            for pattern in patterns_to_remove:
+                cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+            
+            # Extract only the assistant response part
+            assistant_match = re.search(r'<\|im_start\|>assistant\s*(.*?)(?:<\|im_end\|>|$)', cleaned, re.DOTALL)
+            if assistant_match:
+                cleaned = assistant_match.group(1).strip()
+            
+            # If no assistant tags found, try to find action patterns
+            if not cleaned or len(cleaned) < 10:
+                action_match = re.search(r'(\d+\.\s*(?:TAP|INPUT|SWIPE|WAIT):.*?)(?:\n|$)', response, re.IGNORECASE)
+                if action_match:
+                    cleaned = action_match.group(1).strip()
+            
+            # Final cleanup
+            cleaned = cleaned.strip()
+            if not cleaned:
+                # Fallback: try to find any action-like text
+                action_match = re.search(r'(\d+\.\s*[A-Z]+:.*)', response, re.IGNORECASE)
+                if action_match:
+                    cleaned = action_match.group(1).strip()
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.warning(f"Error cleaning response: {e}")
+            return response
     
     def _parse_phi_ground_response(
         self, 
@@ -391,8 +447,34 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 # Try alternative patterns
                 action_match = re.search(r'(TAP|INPUT|SWIPE|WAIT):?\s*(.+)', response, re.IGNORECASE)
                 if not action_match:
-                    logger.warning(f"Could not parse Phi Ground response: {response[:200]}...")
-                    return None
+                    # Try to find any action-like pattern
+                    action_match = re.search(r'(\d+\.\s*[A-Z]+:.*)', response, re.IGNORECASE)
+                    if not action_match:
+                        logger.warning(f"Could not parse Phi Ground response: {response[:200]}...")
+                        # Generate a default wait action if parsing fails
+                        return {
+                            "type": "wait",
+                            "duration": 2.0,
+                            "reasoning": "No valid action parsed, waiting",
+                            "phi_ground_generated": True,
+                            "confidence": 0.1
+                        }
+                    else:
+                        # Try to parse the found pattern
+                        action_text = action_match.group(1)
+                        action_type_match = re.search(r'(TAP|INPUT|SWIPE|WAIT)', action_text, re.IGNORECASE)
+                        if action_type_match:
+                            action_type = action_type_match.group(1).upper()
+                            action_description = action_text
+                        else:
+                            # Default to wait action
+                            return {
+                                "type": "wait",
+                                "duration": 2.0,
+                                "reasoning": f"Unparseable action: {action_text}",
+                                "phi_ground_generated": True,
+                                "confidence": 0.1
+                            }
                 else:
                     # Use default number 1 if not found
                     action_type = action_match.group(1).upper()

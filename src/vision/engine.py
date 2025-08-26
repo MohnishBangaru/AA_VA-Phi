@@ -39,12 +39,32 @@ class VisionEngine:
             logger.warning("VisionEngine: OCR disabled via configuration (USE_OCR=false)")
         else:
             try:
-                pytesseract.get_tesseract_version()
-                self._ocr_available = True
-            except pytesseract.pytesseract.TesseractNotFoundError:
-                logger.warning(
-                    "VisionEngine: Tesseract not found. OCR will be skipped."
-                )
+                # Try to find Tesseract in common locations
+                tesseract_paths = [
+                    "/opt/homebrew/bin/tesseract",  # macOS Homebrew
+                    "/usr/local/bin/tesseract",     # macOS/Linux
+                    "/usr/bin/tesseract",           # Linux
+                    "tesseract"                     # PATH
+                ]
+                
+                tesseract_found = False
+                for path in tesseract_paths:
+                    try:
+                        pytesseract.pytesseract.tesseract_cmd = path
+                        pytesseract.get_tesseract_version()
+                        logger.info(f"VisionEngine: Tesseract found at {path}")
+                        tesseract_found = True
+                        break
+                    except Exception:
+                        continue
+                
+                if tesseract_found:
+                    self._ocr_available = True
+                else:
+                    logger.warning(
+                        "VisionEngine: Tesseract not found in common locations. OCR will be skipped."
+                    )
+                    
             except Exception as exc:
                 logger.warning(
                     f"VisionEngine: Unexpected error checking Tesseract ({exc}). OCR disabled."
