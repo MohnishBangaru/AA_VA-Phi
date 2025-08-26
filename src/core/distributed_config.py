@@ -43,6 +43,7 @@ class DistributedConfig(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore unexpected env vars rather than raising errors
     
     def get_local_adb_url(self) -> str:
         """Get local ADB connection URL."""
