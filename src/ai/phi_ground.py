@@ -51,46 +51,70 @@ class PhiGroundActionGenerator:
             logger.info(f"Initializing Phi Ground model: {self.model_name}")
             logger.info(f"Using device: {self.device}")
             
-            # Try to load model with FlashAttention2 first
-            try:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    device_map="auto" if self.device == "cuda" else None,
-                    trust_remote_code=True
-                )
-                logger.info("Phi Ground model initialized with FlashAttention2")
-            except Exception as flash_error:
-                if ("flash_attn" in str(flash_error) or 
-                    "FlashAttention2" in str(flash_error) or 
-                    "undefined symbol" in str(flash_error) or
-                    "flash_attn_2_cuda" in str(flash_error)):
-                    logger.warning("FlashAttention2 not available or has compatibility issues, falling back to standard attention")
-                    logger.warning(f"FlashAttention2 error: {flash_error}")
-                    
-                    # Retry without FlashAttention2
-                    try:
-                        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                        self.model = AutoModelForCausalLM.from_pretrained(
-                            self.model_name,
-                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                            device_map="auto" if self.device == "cuda" else None,
-                            trust_remote_code=True,
-                            attn_implementation="eager"  # Disable FlashAttention2
-                        )
-                        logger.info("Phi Ground model initialized with standard attention")
-                    except Exception as fallback_error:
-                        logger.error(f"Standard attention fallback also failed: {fallback_error}")
-                        raise fallback_error
-                else:
-                    raise flash_error
+            # Load tokenizer first
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             
-            if self.device == "cpu":
-                self.model = self.model.to(self.device)
+            # Try multiple initialization strategies
+            initialization_strategies = [
+                # Strategy 1: Try with FlashAttention2 (default)
+                {
+                    "name": "FlashAttention2",
+                    "kwargs": {
+                        "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+                        "device_map": "auto" if self.device == "cuda" else None,
+                        "trust_remote_code": True
+                    }
+                },
+                # Strategy 2: Try with standard attention (eager)
+                {
+                    "name": "Standard Attention (eager)",
+                    "kwargs": {
+                        "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
+                        "device_map": "auto" if self.device == "cuda" else None,
+                        "trust_remote_code": True,
+                        "attn_implementation": "eager"
+                    }
+                },
+                # Strategy 3: Try with CPU fallback
+                {
+                    "name": "CPU Fallback",
+                    "kwargs": {
+                        "torch_dtype": torch.float32,
+                        "device_map": None,
+                        "trust_remote_code": True,
+                        "attn_implementation": "eager"
+                    }
+                }
+            ]
+            
+            for strategy in initialization_strategies:
+                try:
+                    logger.info(f"Trying initialization strategy: {strategy['name']}")
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        **strategy['kwargs']
+                    )
+                    
+                    # Move to CPU if using CPU fallback strategy
+                    if strategy['name'] == "CPU Fallback":
+                        self.device = "cpu"
+                        self.model = self.model.to("cpu")
+                    
+                    logger.info(f"Phi Ground model initialized successfully with {strategy['name']}")
+                    break
+                    
+                except Exception as strategy_error:
+                    error_msg = str(strategy_error)
+                    logger.warning(f"Strategy '{strategy['name']}' failed: {error_msg}")
+                    
+                    # If this is the last strategy, raise the error
+                    if strategy == initialization_strategies[-1]:
+                        logger.error(f"All initialization strategies failed. Last error: {strategy_error}")
+                        raise strategy_error
+                    continue
             
             self._initialized = True
-            logger.info("Phi Ground model initialized successfully")
+            logger.info("Phi Ground model initialization completed")
             
         except Exception as e:
             logger.error(f"Failed to initialize Phi Ground model: {e}")

@@ -31,7 +31,7 @@ def _load_templates() -> list[Template]:
     """Load all PNG/JPG templates from the templates directory (lazy)."""
     templates: list[Template] = []
     if not os.path.isdir(TEMPLATES_DIR):
-        logger.warning("Template directory not found: {0}", TEMPLATES_DIR)
+        logger.debug("Template directory not found: {0}", TEMPLATES_DIR)
         return templates
 
     for fname in os.listdir(TEMPLATES_DIR):
