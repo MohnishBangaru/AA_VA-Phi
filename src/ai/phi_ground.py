@@ -60,12 +60,36 @@ class PhiGroundActionGenerator:
                 from PIL import Image
                 import numpy as np
                 dummy_image = Image.fromarray(np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8))
-                test_inputs = self.tokenizer("test", return_tensors="pt", images=dummy_image)
-                self.vision_supported = True
-                logger.info("Vision tokenization supported")
-            except (TypeError, AttributeError):
-                self.vision_supported = False
-                logger.info("Vision tokenization not supported, using text-only mode")
+                
+                # Try multiple vision tokenization approaches
+                vision_works = False
+                
+                # Approach 1: Direct images parameter
+                try:
+                    test_inputs = self.tokenizer("test", return_tensors="pt", images=dummy_image)
+                    vision_works = True
+                    logger.info("Vision tokenization supported (direct)")
+                except Exception as e1:
+                    logger.debug(f"Direct vision approach failed: {e1}")
+                    
+                    # Approach 2: Try with image processing
+                    try:
+                        # Some models require image preprocessing
+                        if hasattr(self.tokenizer, 'image_processor'):
+                            processed_image = self.tokenizer.image_processor(dummy_image, return_tensors="pt")
+                            test_inputs = self.tokenizer("test", return_tensors="pt", **processed_image)
+                            vision_works = True
+                            logger.info("Vision tokenization supported (with processor)")
+                    except Exception as e2:
+                        logger.debug(f"Processor vision approach failed: {e2}")
+                
+                self.vision_supported = vision_works
+                
+                if self.vision_supported:
+                    logger.info("Vision tokenization supported")
+                else:
+                    logger.info("Vision tokenization not supported, using text-only mode")
+                    
             except Exception as e:
                 self.vision_supported = False
                 logger.warning(f"Vision support check failed: {e}, using text-only mode")
