@@ -70,50 +70,42 @@ class PhiGroundActionGenerator:
                 self.vision_supported = False
                 logger.warning(f"Vision support check failed: {e}, using text-only mode")
             
-            # Try multiple initialization strategies
+            # Try optimized initialization strategies (fastest first)
             initialization_strategies = [
-                # Strategy 1: Try with FlashAttention2 (default) - only if available
+                # Strategy 1: Fast CPU loading (fastest for local testing)
                 {
-                    "name": "FlashAttention2",
-                    "kwargs": {
-                        "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
-                        "device_map": "auto" if self.device == "cuda" else None,
-                        "trust_remote_code": True
-                    }
-                },
-                # Strategy 2: Try with standard attention (eager) - explicitly disable FlashAttention2
-                {
-                    "name": "Standard Attention (eager)",
-                    "kwargs": {
-                        "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
-                        "device_map": "auto" if self.device == "cuda" else None,
-                        "trust_remote_code": True,
-                        "attn_implementation": "eager",
-                        "use_flash_attention_2": False
-                    }
-                },
-                # Strategy 3: Try with minimal configuration - explicitly disable FlashAttention2
-                {
-                    "name": "Minimal Configuration",
+                    "name": "Fast CPU Loading",
                     "kwargs": {
                         "torch_dtype": torch.float32,
                         "device_map": None,
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
                         "low_cpu_mem_usage": True,
-                        "use_flash_attention_2": False
+                        "use_flash_attention_2": False,
+                        "load_in_8bit": False,
+                        "load_in_4bit": False
                     }
                 },
-                # Strategy 4: Try with CPU fallback - explicitly disable FlashAttention2
+                # Strategy 2: CUDA without FlashAttention2 (fast for RunPod)
                 {
-                    "name": "CPU Fallback",
+                    "name": "CUDA Standard",
                     "kwargs": {
-                        "torch_dtype": torch.float32,
-                        "device_map": None,
+                        "torch_dtype": torch.float16,
+                        "device_map": "auto",
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
-                        "low_cpu_mem_usage": True,
-                        "use_flash_attention_2": False
+                        "use_flash_attention_2": False,
+                        "low_cpu_mem_usage": True
+                    }
+                },
+                # Strategy 3: CUDA with FlashAttention2 (only if available)
+                {
+                    "name": "CUDA FlashAttention2",
+                    "kwargs": {
+                        "torch_dtype": torch.float16,
+                        "device_map": "auto",
+                        "trust_remote_code": True,
+                        "low_cpu_mem_usage": True
                     }
                 }
             ]
