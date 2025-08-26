@@ -64,24 +64,28 @@ class PhiGroundActionGenerator:
                 # Try multiple vision tokenization approaches
                 vision_works = False
                 
-                # Approach 1: Direct images parameter
-                try:
-                    test_inputs = self.tokenizer("test", return_tensors="pt", images=dummy_image)
+                # Approach 1: Check if model supports vision at all
+                if hasattr(self.tokenizer, 'image_processor') or hasattr(self.tokenizer, 'process_images'):
                     vision_works = True
-                    logger.info("Vision tokenization supported (direct)")
-                except Exception as e1:
-                    logger.debug(f"Direct vision approach failed: {e1}")
-                    
-                    # Approach 2: Try with image processing
+                    logger.info("Vision tokenization supported (model has vision capabilities)")
+                else:
+                    # Approach 2: Try with image processor from transformers
                     try:
-                        # Some models require image preprocessing
-                        if hasattr(self.tokenizer, 'image_processor'):
-                            processed_image = self.tokenizer.image_processor(dummy_image, return_tensors="pt")
-                            test_inputs = self.tokenizer("test", return_tensors="pt", **processed_image)
+                        from transformers import AutoImageProcessor
+                        image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                        processed_image = image_processor(dummy_image, return_tensors="pt")
+                        test_inputs = self.tokenizer("test", return_tensors="pt", **processed_image)
+                        vision_works = True
+                        logger.info("Vision tokenization supported (with AutoImageProcessor)")
+                    except Exception as e1:
+                        logger.debug(f"AutoImageProcessor approach failed: {e1}")
+                        
+                        # Approach 3: Check if it's a vision model by name
+                        if "vision" in self.model_name.lower():
                             vision_works = True
-                            logger.info("Vision tokenization supported (with processor)")
-                    except Exception as e2:
-                        logger.debug(f"Processor vision approach failed: {e2}")
+                            logger.info("Vision tokenization supported (vision model detected)")
+                        else:
+                            logger.debug("No vision capabilities detected")
                 
                 self.vision_supported = vision_works
                 
@@ -284,13 +288,46 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             if self.vision_supported:
                 try:
                     logger.info("Using vision tokenization with screenshot")
-                    inputs = self.tokenizer(
-                        prompt,
-                        return_tensors="pt",
-                        images=image,
-                        padding=True,
-                        truncation=True
-                    ).to(self.device)
+                    
+                    # Try multiple vision tokenization approaches
+                    vision_inputs = None
+                    
+                    # Approach 1: Try with AutoImageProcessor
+                    try:
+                        from transformers import AutoImageProcessor
+                        image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                        processed_image = image_processor(image, return_tensors="pt")
+                        vision_inputs = self.tokenizer(
+                            prompt,
+                            return_tensors="pt",
+                            **processed_image,
+                            padding=True,
+                            truncation=True
+                        ).to(self.device)
+                        logger.info("Vision tokenization successful with AutoImageProcessor")
+                    except Exception as e1:
+                        logger.debug(f"AutoImageProcessor approach failed: {e1}")
+                        
+                        # Approach 2: Try with model's image processor
+                        try:
+                            if hasattr(self.tokenizer, 'image_processor'):
+                                processed_image = self.tokenizer.image_processor(image, return_tensors="pt")
+                                vision_inputs = self.tokenizer(
+                                    prompt,
+                                    return_tensors="pt",
+                                    **processed_image,
+                                    padding=True,
+                                    truncation=True
+                                ).to(self.device)
+                                logger.info("Vision tokenization successful with model's image processor")
+                        except Exception as e2:
+                            logger.debug(f"Model image processor approach failed: {e2}")
+                    
+                    if vision_inputs is not None:
+                        inputs = vision_inputs
+                    else:
+                        raise Exception("All vision tokenization approaches failed")
+                        
                 except Exception as e:
                     logger.warning(f"Vision tokenization failed: {e}, falling back to text-only")
                     self.vision_supported = False
