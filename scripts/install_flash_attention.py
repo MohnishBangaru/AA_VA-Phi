@@ -19,6 +19,10 @@ def run_command(command: str, description: str, silent: bool = False) -> bool:
     if not silent:
         print(f"🔧 {description}...")
     try:
+        # Use python -m pip to ensure we use the correct Python interpreter
+        if command.startswith("pip install"):
+            command = command.replace("pip install", "python -m pip install")
+        
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         if result.returncode == 0:
             if not silent:
