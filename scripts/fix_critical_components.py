@@ -49,11 +49,11 @@ def fix_transformers_issue():
         run_command("pip install --upgrade safetensors", "Updating safetensors")
         run_command("pip install --upgrade huggingface-hub", "Updating huggingface-hub")
         
-        # Try to install FlashAttention2 (optional)
+        # Try to install FlashAttention2 using specialized script
         print("🔄 Attempting to install FlashAttention2 for GPU acceleration...")
-        flash_result = run_command("pip install --upgrade flash-attn", "Installing FlashAttention2 for GPU acceleration", silent=True)
+        flash_result = run_command("python scripts/install_flash_attention.py", "Installing FlashAttention2 using specialized script", silent=True)
         if flash_result:
-            print("✅ FlashAttention2 installed successfully")
+            print("✅ FlashAttention2 installation completed")
         else:
             print("⚠️ FlashAttention2 installation failed - will use standard attention")
             print("   This is normal and the system will work without GPU acceleration")
