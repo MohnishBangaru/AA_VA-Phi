@@ -96,7 +96,7 @@ class DistributedDeviceManager:
             logger.error(f"Failed to get devices: {response.get('error')}")
             return []
     
-    def take_screenshot(self, output_path: str = None) -> Optional[str]:
+    def take_screenshot(self, output_path: str = None) -> Optional[bytes]:
         """Take screenshot from device via local ADB server."""
         request_data = {}
         if output_path:
@@ -105,7 +105,14 @@ class DistributedDeviceManager:
         response = self._make_request("POST", "/screenshot", json=request_data)
         
         if response.get("success", False):
-            return response.get("data", {}).get("output_path")
+            # Return screenshot data as bytes
+            screenshot_data = response.get("data", {}).get("screenshot_data")
+            if screenshot_data:
+                import base64
+                return base64.b64decode(screenshot_data)
+            else:
+                # Fallback to file path if data not available
+                return response.get("data", {}).get("output_path")
         else:
             logger.error(f"Failed to take screenshot: {response.get('error')}")
             return None

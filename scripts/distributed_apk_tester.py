@@ -46,7 +46,14 @@ class DistributedAPKTester:
         """Initialize distributed APK tester."""
         self.apk_path = apk_path
         self.local_server_url = local_server_url
-        self.output_dir = Path(output_dir)
+        
+        # Use local directory for saving results (on laptop, not RunPod)
+        if output_dir.startswith("http"):
+            # If using tunnel URL, save to local directory
+            self.output_dir = Path("local_test_reports")
+        else:
+            self.output_dir = Path(output_dir)
+        
         self.output_dir.mkdir(exist_ok=True)
         
         # Initialize components
@@ -129,10 +136,9 @@ class DistributedAPKTester:
             await asyncio.sleep(3)
             
             # Take initial screenshot
-            initial_screenshot = self.device_manager.take_screenshot(
-                str(self.output_dir / "initial_screenshot.png")
-            )
+            initial_screenshot = self.device_manager.take_screenshot()
             if initial_screenshot:
+                await self._save_screenshot_locally(initial_screenshot, "initial_screenshot.png")
                 self.test_results["screenshots_taken"] += 1
             
             # Perform actions
@@ -141,10 +147,10 @@ class DistributedAPKTester:
                 
                 try:
                     # Take screenshot for analysis
-                    screenshot_path = str(self.output_dir / f"action_{i+1}_screenshot.png")
-                    screenshot = self.device_manager.take_screenshot(screenshot_path)
+                    screenshot = self.device_manager.take_screenshot()
                     
                     if screenshot:
+                        screenshot_path = await self._save_screenshot_locally(screenshot, f"action_{i+1}_screenshot.png")
                         self.test_results["screenshots_taken"] += 1
                         
                         # Analyze screenshot with vision engine
@@ -171,10 +177,9 @@ class DistributedAPKTester:
                     self.test_results["errors"].append(f"Action {i+1}: {str(e)}")
             
             # Take final screenshot
-            final_screenshot = self.device_manager.take_screenshot(
-                str(self.output_dir / "final_screenshot.png")
-            )
+            final_screenshot = self.device_manager.take_screenshot()
             if final_screenshot:
+                await self._save_screenshot_locally(final_screenshot, "final_screenshot.png")
                 self.test_results["screenshots_taken"] += 1
             
             # Uninstall app
@@ -249,9 +254,10 @@ class DistributedAPKTester:
         return "com.example.app"  # Fallback
     
     async def _save_results(self):
-        """Save test results."""
+        """Save test results locally."""
         import json
         
+        # Save results to local directory
         results_file = self.output_dir / "test_results.json"
         with open(results_file, 'w') as f:
             json.dump(self.test_results, f, indent=2)
@@ -263,6 +269,18 @@ class DistributedAPKTester:
         logger.info(f"Screenshots taken: {self.test_results['screenshots_taken']}")
         logger.info(f"Errors: {len(self.test_results['errors'])}")
         logger.info(f"Success: {self.test_results['success']}")
+        logger.info(f"Results saved to: {self.output_dir.absolute()}")
+    
+    async def _save_screenshot_locally(self, screenshot_data: bytes, filename: str) -> str:
+        """Save screenshot to local directory."""
+        screenshot_path = self.output_dir / filename
+        
+        # Save screenshot locally
+        with open(screenshot_path, 'wb') as f:
+            f.write(screenshot_data)
+        
+        logger.info(f"Screenshot saved: {screenshot_path}")
+        return str(screenshot_path)
 
 
 async def main():

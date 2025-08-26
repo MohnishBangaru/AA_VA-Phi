@@ -142,13 +142,21 @@ async def take_screenshot(request: ScreenshotRequest):
     
     if result['success']:
         try:
-            # Save screenshot - binary data
+            # Save screenshot locally
             with open(output_path, 'wb') as f:
                 f.write(result['stdout'])
             
+            # Return both file path and base64 data
+            import base64
+            screenshot_data = base64.b64encode(result['stdout']).decode('utf-8')
+            
             return ADBResponse(
                 success=True,
-                data={'output_path': output_path, 'size': len(result['stdout'])}
+                data={
+                    'output_path': output_path, 
+                    'size': len(result['stdout']),
+                    'screenshot_data': screenshot_data
+                }
             )
         except Exception as e:
             return ADBResponse(success=False, error=str(e))
