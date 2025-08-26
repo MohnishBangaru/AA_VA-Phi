@@ -81,7 +81,6 @@ class PhiGroundActionGenerator:
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
                         "low_cpu_mem_usage": True,
-                        "use_flash_attention_2": False,
                         "load_in_8bit": False,
                         "load_in_4bit": False
                     }
@@ -94,7 +93,6 @@ class PhiGroundActionGenerator:
                         "device_map": "auto",
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
-                        "use_flash_attention_2": False,
                         "low_cpu_mem_usage": True
                     }
                 },

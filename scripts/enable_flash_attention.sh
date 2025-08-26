@@ -16,10 +16,24 @@ echo "📊 PyTorch: $PYTORCH_VERSION"
 # Clear cache first
 echo "🧹 Clearing cache..."
 pip cache purge
+pip uninstall -y flash-attn
 
-# Install FlashAttention2 (pre-compiled wheel for speed)
-echo "📦 Installing FlashAttention2..."
-pip install flash-attn --find-links https://github.com/Dao-AILab/flash-attention/releases
+# Check PyTorch and CUDA compatibility
+echo "🔍 Checking compatibility..."
+CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $6}' | cut -c2-)
+echo "📊 CUDA: $CUDA_VERSION"
+
+# Install compatible FlashAttention2 version
+if [[ "$PYTORCH_VERSION" == 2.1* ]]; then
+    echo "📦 Installing flash-attn==2.3.6 for PyTorch 2.1.x..."
+    pip install flash-attn==2.3.6 --no-build-isolation
+elif [[ "$PYTORCH_VERSION" == 2.0* ]]; then
+    echo "📦 Installing flash-attn==2.2.4 for PyTorch 2.0.x..."
+    pip install flash-attn==2.2.4 --no-build-isolation
+else
+    echo "📦 Installing compatible flash-attn version..."
+    pip install flash-attn==2.5.8 --no-build-isolation
+fi
 
 # Verify installation
 echo "✅ Verifying FlashAttention2..."
