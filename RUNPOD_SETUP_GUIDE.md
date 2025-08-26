@@ -43,7 +43,12 @@ cd AA_VA-Phi
 ```bash
 # On RunPod, install required packages
 cd /workspace/AA_VA-Phi
+
+# Option A: Install from requirements.txt
 pip install -r requirements.txt
+
+# Option B: Use the dependency fixer (recommended for RunPod)
+python scripts/fix_runpod_dependencies.py
 
 # Install additional dependencies for distributed setup
 pip install fastapi uvicorn aiohttp requests
@@ -144,12 +149,17 @@ curl http://YOUR_LAPTOP_IP:8000/health
 ```
 
 #### 3. Import Errors
-**Problem**: Module not found
+**Problem**: Module not found (e.g., `ModuleNotFoundError: No module named 'dotenv'`)
 **Solution**:
 ```bash
-# Install missing dependencies
+# Use the dependency fixer
+python scripts/fix_runpod_dependencies.py
+
+# Or install specific missing packages
+pip install python-dotenv fastapi uvicorn aiohttp requests
+
+# Or install all requirements
 pip install -r requirements.txt
-pip install fastapi uvicorn aiohttp requests
 ```
 
 #### 4. ADB Device Not Found
