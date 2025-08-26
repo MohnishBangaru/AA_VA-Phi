@@ -91,14 +91,26 @@ class PhiGroundActionGenerator:
                         "attn_implementation": "eager"
                     }
                 },
-                # Strategy 3: Try with CPU fallback
+                # Strategy 3: Try with minimal configuration
+                {
+                    "name": "Minimal Configuration",
+                    "kwargs": {
+                        "torch_dtype": torch.float32,
+                        "device_map": None,
+                        "trust_remote_code": True,
+                        "attn_implementation": "eager",
+                        "low_cpu_mem_usage": True
+                    }
+                },
+                # Strategy 4: Try with CPU fallback
                 {
                     "name": "CPU Fallback",
                     "kwargs": {
                         "torch_dtype": torch.float32,
                         "device_map": None,
                         "trust_remote_code": True,
-                        "attn_implementation": "eager"
+                        "attn_implementation": "eager",
+                        "low_cpu_mem_usage": True
                     }
                 }
             ]
@@ -247,30 +259,45 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     return_tensors="pt"
                 ).to(self.device)
             
-            # Generate response
+            # Generate response with caching fixes
             with torch.no_grad():
                 try:
-                    # Use simplified generation parameters to avoid cache issues
+                    # Try with full inputs first
                     outputs = self.model.generate(
-                        input_ids=inputs.get('input_ids'),
-                        attention_mask=inputs.get('attention_mask'),
+                        **inputs,
                         max_new_tokens=256,
                         temperature=0.7,
                         do_sample=True,
                         pad_token_id=self.tokenizer.eos_token_id,
-                        use_cache=False  # Disable cache to avoid DynamicCache issues
+                        use_cache=True
                     )
                 except Exception as e:
-                    logger.warning(f"Model generation failed: {e}")
-                    # Try with even simpler parameters
-                    logger.info("Trying with minimal generation parameters")
-                    outputs = self.model.generate(
-                        input_ids=inputs.get('input_ids'),
-                        max_new_tokens=128,
-                        do_sample=False,  # Use greedy decoding
-                        pad_token_id=self.tokenizer.eos_token_id,
-                        use_cache=False
-                    )
+                    logger.warning(f"Model generation failed with full inputs: {e}")
+                    
+                    # Fallback to basic generation without cache
+                    try:
+                        logger.info("Falling back to basic generation without cache")
+                        outputs = self.model.generate(
+                            input_ids=inputs.get('input_ids'),
+                            attention_mask=inputs.get('attention_mask'),
+                            max_new_tokens=256,
+                            temperature=0.7,
+                            do_sample=True,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            use_cache=False
+                        )
+                    except Exception as e2:
+                        logger.warning(f"Basic generation failed: {e2}")
+                        
+                        # Final fallback with minimal parameters
+                        logger.info("Using minimal generation parameters")
+                        outputs = self.model.generate(
+                            input_ids=inputs.get('input_ids'),
+                            max_new_tokens=256,
+                            do_sample=False,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            use_cache=False
+                        )
             
             # Decode response
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -285,25 +312,6 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             
         except Exception as e:
             logger.error(f"Phi Ground action generation failed: {e}")
-            
-            # Try one more fallback with minimal parameters
-            try:
-                logger.info("Attempting final fallback with minimal generation")
-                with torch.no_grad():
-                    outputs = self.model.generate(
-                        input_ids=inputs.get('input_ids'),
-                        max_new_tokens=50,
-                        do_sample=False,
-                        use_cache=False
-                    )
-                response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-                action = self._parse_phi_ground_response(response, ui_elements)
-                if action:
-                    logger.info(f"Fallback generated action: {action['type']}")
-                    return action
-            except Exception as fallback_error:
-                logger.error(f"Final fallback also failed: {fallback_error}")
-            
             return None
     
     def _parse_phi_ground_response(
