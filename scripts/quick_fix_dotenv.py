@@ -19,7 +19,7 @@ def main():
         print("✅ python-dotenv installed successfully!")
         
         # Also install other common missing packages
-        packages = ["fastapi", "uvicorn", "aiohttp", "requests", "pydantic"]
+        packages = ["fastapi", "uvicorn", "aiohttp", "requests", "pydantic", "pydantic-settings"]
         for package in packages:
             try:
                 subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
@@ -32,7 +32,7 @@ def main():
     except subprocess.CalledProcessError as e:
         print(f"❌ Installation failed: {e}")
         print("\n💡 Alternative: Try running manually:")
-        print("pip install python-dotenv fastapi uvicorn aiohttp requests")
+        print("pip install python-dotenv fastapi uvicorn aiohttp requests pydantic-settings")
         return 1
     
     return 0
