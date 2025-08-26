@@ -28,7 +28,6 @@ from src.core.distributed_config import distributed_config
 from src.vision.engine import VisionEngine
 from src.ai.phi_ground import PhiGroundActionGenerator
 from src.ai.openai_client import OpenAIClient
-from src.automation.action_executor import ActionExecutor
 import logging
 
 # Configure logging
@@ -37,6 +36,72 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class DistributedActionExecutor:
+    """Action executor that works with DistributedDeviceManager."""
+    
+    def __init__(self, device_manager: DistributedDeviceManager):
+        """Initialize the distributed action executor."""
+        self.device_manager = device_manager
+        self.action_history = []
+        self.max_retries = 3
+    
+    async def execute_action(self, action: dict) -> bool:
+        """Execute a single action using the distributed device manager."""
+        action_type = action.get("type")
+        action_id = f"{action_type}_{int(time.time() * 1000)}"
+        
+        logger.info(f"Executing action {action_id}: {action_type}")
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                success = self._perform_action(action)
+                if success:
+                    logger.info(f"Action {action_id} completed successfully")
+                    return True
+                    
+                if attempt < self.max_retries:
+                    logger.warning(f"Action failed, retrying ({attempt + 1}/{self.max_retries})")
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    
+            except Exception as e:
+                if attempt < self.max_retries:
+                    logger.warning(f"Action error, retrying ({attempt + 1}/{self.max_retries}): {e}")
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                else:
+                    logger.error(f"Action failed after {self.max_retries} retries: {e}")
+                    
+        return False
+    
+    def _perform_action(self, action: dict) -> bool:
+        """Perform the actual action using the device manager's specific methods."""
+        action_type = action.get("type")
+        
+        if action_type == "tap":
+            return self.device_manager.tap(action["x"], action["y"])
+        elif action_type == "swipe":
+            return self.device_manager.swipe(
+                action["start_x"], action["start_y"],
+                action["end_x"], action["end_y"],
+                action.get("duration", 500)
+            )
+        elif action_type == "keyevent":
+            return self.device_manager.send_keyevent(action["key_code"])
+        elif action_type == "input_text":
+            # For text input, we need to use shell command
+            text = action["text"]
+            command = f"input text '{text}'"
+            result = self.device_manager.execute_shell_command(command)
+            return result is not None
+        elif action_type == "wait":
+            # For wait actions, just sleep
+            duration = action.get("duration", 1.0)
+            time.sleep(duration)
+            return True
+        else:
+            logger.error(f"Unknown action type: {action_type}")
+            return False
 
 
 class DistributedAPKTester:
@@ -99,19 +164,20 @@ class DistributedAPKTester:
         
         try:
             self.openai_client = OpenAIClient()
-            logger.info("OpenAI client initialized successfully")
+            await self.openai_client.initialize()
+            logger.info("OpenAI Client initialized successfully")
         except Exception as e:
-            logger.warning(f"OpenAI client initialization failed: {e}")
+            logger.warning(f"OpenAI Client initialization failed: {e}")
             self.openai_client = None
         
         # Initialize action executor
-        self.action_executor = ActionExecutor(self.device_manager)
+        self.action_executor = DistributedActionExecutor(self.device_manager)
         
         logger.info("Distributed APK Tester initialized successfully")
     
     async def run_test(self, num_actions: int = 10):
-        """Run the distributed APK test."""
-        logger.info(f"Starting distributed APK test with {num_actions} actions")
+        """Run the APK test."""
+        logger.info(f"Starting APK test with {num_actions} actions")
         self.test_results["start_time"] = time.time()
         
         try:
@@ -126,37 +192,23 @@ class DistributedAPKTester:
             if not self.device_manager.install_apk(self.apk_path):
                 raise RuntimeError("Failed to install APK")
             
-            # Get package name from APK
-            package_name = self._extract_package_name()
+            # Extract package name from APK path
+            package_name = self._extract_package_name(self.apk_path)
             
             # Launch app
             if not self.device_manager.launch_app(package_name):
                 raise RuntimeError("Failed to launch app")
             
-            # Wait for app to stabilize
+            # Wait for app to load
             await asyncio.sleep(3)
-            
-            # Take initial screenshot
-            initial_screenshot = self.device_manager.take_screenshot()
-            logger.info(f"Initial screenshot type: {type(initial_screenshot)}")
-            if initial_screenshot:
-                screenshot_path = await self._save_screenshot_locally(initial_screenshot, "initial_screenshot.png")
-                if screenshot_path:
-                    self.test_results["screenshots_taken"] += 1
-                else:
-                    logger.error("Failed to save initial screenshot")
-            else:
-                logger.error("Failed to take initial screenshot")
             
             # Perform actions
             for i in range(num_actions):
                 logger.info(f"Performing action {i+1}/{num_actions}")
                 
                 try:
-                    # Take screenshot for analysis
+                    # Take screenshot
                     screenshot = self.device_manager.take_screenshot()
-                    logger.info(f"Action {i+1} screenshot type: {type(screenshot)}")
-                    
                     if screenshot:
                         screenshot_path = await self._save_screenshot_locally(screenshot, f"action_{i+1}_screenshot.png")
                         if screenshot_path:
@@ -264,87 +316,96 @@ class DistributedAPKTester:
                 "key_code": random.choice([4, 24, 25])  # Back, Volume Up, Volume Down
             }
     
-    def _extract_package_name(self) -> str:
-        """Extract package name from APK path."""
-        # This is a simplified version - you might want to use a proper APK parser
-        apk_name = Path(self.apk_path).stem
-        if "com." in apk_name:
-            # Extract package name from filename
-            parts = apk_name.split("_")
-            for part in parts:
-                if part.startswith("com."):
-                    return part
-        return "com.example.app"  # Fallback
-    
-    async def _save_results(self):
-        """Save test results locally."""
-        import json
+    def _extract_package_name(self, apk_path: str) -> str:
+        """Extract package name from APK filename."""
+        # For now, use a simple heuristic based on filename
+        # In a real implementation, you'd use aapt or similar to extract package info
+        filename = Path(apk_path).name
         
-        # Save results to local directory
-        results_file = self.output_dir / "test_results.json"
-        with open(results_file, 'w') as f:
-            json.dump(self.test_results, f, indent=2)
+        # Try to extract package name from filename like "com.Dominos_12.1.16-299_minAPI23..."
+        if "com." in filename:
+            package_part = filename.split("_")[0]
+            if package_part.startswith("com."):
+                return package_part
         
-        # Generate summary
-        duration = self.test_results["end_time"] - self.test_results["start_time"]
-        logger.info(f"Test completed in {duration:.2f} seconds")
-        logger.info(f"Actions performed: {self.test_results['actions_performed']}")
-        logger.info(f"Screenshots taken: {self.test_results['screenshots_taken']}")
-        logger.info(f"Errors: {len(self.test_results['errors'])}")
-        logger.info(f"Success: {self.test_results['success']}")
-        logger.info(f"Results saved to: {self.output_dir.absolute()}")
+        # Fallback: try to extract from common patterns
+        if "Dominos" in filename:
+            return "com.Dominos"
+        
+        # Default fallback
+        return "com.example.app"
     
-    async def _save_screenshot_locally(self, screenshot_data, filename: str) -> str:
+    async def _save_screenshot_locally(self, screenshot_data: bytes, filename: str) -> Optional[str]:
         """Save screenshot to local directory."""
-        screenshot_path = self.output_dir / filename
-        
-        # Handle different data types
-        if isinstance(screenshot_data, str):
-            # If it's a file path, read the file
-            try:
-                with open(screenshot_data, 'rb') as f:
-                    screenshot_data = f.read()
-                logger.info(f"Read screenshot from file: {screenshot_data}")
-            except Exception as e:
-                logger.error(f"Failed to read screenshot file {screenshot_data}: {e}")
-                return None
-        elif not isinstance(screenshot_data, bytes):
-            logger.error(f"Unexpected screenshot data type: {type(screenshot_data)}")
-            return None
-        
-        # Save screenshot locally
         try:
+            screenshot_path = self.output_dir / filename
             with open(screenshot_path, 'wb') as f:
                 f.write(screenshot_data)
-            
             logger.info(f"Screenshot saved: {screenshot_path}")
             return str(screenshot_path)
         except Exception as e:
             logger.error(f"Failed to save screenshot: {e}")
             return None
+    
+    async def _save_results(self):
+        """Save test results to local directory."""
+        try:
+            results_path = self.output_dir / "test_results.json"
+            
+            # Calculate duration
+            duration = self.test_results["end_time"] - self.test_results["start_time"]
+            
+            # Create summary
+            summary = {
+                "test_info": {
+                    "apk_path": self.apk_path,
+                    "local_server": self.local_server_url,
+                    "duration_seconds": duration,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                },
+                "results": self.test_results,
+                "success_rate": self.test_results["actions_performed"] / max(1, len(self.test_results["errors"]) + self.test_results["actions_performed"])
+            }
+            
+            import json
+            with open(results_path, 'w') as f:
+                json.dump(summary, f, indent=2)
+            
+            logger.info(f"Results saved to: {self.output_dir}")
+            
+            # Print summary
+            logger.info(f"Test completed in {duration:.2f} seconds")
+            logger.info(f"Actions performed: {self.test_results['actions_performed']}")
+            logger.info(f"Screenshots taken: {self.test_results['screenshots_taken']}")
+            logger.info(f"Errors: {len(self.test_results['errors'])}")
+            logger.info(f"Success: {self.test_results['success']}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save results: {e}")
 
 
 async def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="Distributed Universal APK Tester")
+    parser = argparse.ArgumentParser(description="Distributed APK Tester")
     parser.add_argument("--apk", required=True, help="Path to APK file")
-    parser.add_argument("--local-server", required=True, help="Local ADB server URL (e.g., http://192.168.1.100:8000)")
-    parser.add_argument("--output-dir", default="/Users/mohnishbangaru/Drizz/local_test_reports", help="Output directory for results")
+    parser.add_argument("--local-server", required=True, help="Local ADB server URL")
     parser.add_argument("--actions", type=int, default=10, help="Number of actions to perform")
+    parser.add_argument("--output-dir", default="test_reports", help="Output directory for results")
     
     args = parser.parse_args()
     
-    # Validate APK file
-    if not Path(args.apk).exists():
-        logger.error(f"APK file not found: {args.apk}")
-        sys.exit(1)
-    
-    # Create and run tester
+    # Create tester
     tester = DistributedAPKTester(args.apk, args.local_server, args.output_dir)
     
     try:
+        # Initialize
         await tester.initialize()
+        
+        # Run test
         await tester.run_test(args.actions)
+        
+    except KeyboardInterrupt:
+        logger.info("Test interrupted by user")
     except Exception as e:
         logger.error(f"Test failed: {e}")
         sys.exit(1)
