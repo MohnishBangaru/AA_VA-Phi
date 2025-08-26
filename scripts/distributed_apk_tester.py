@@ -21,17 +21,22 @@ from typing import Optional
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.distributed_device_manager import DistributedDeviceManager, test_distributed_connection
-from core.distributed_config import distributed_config
-from vision.engine import VisionAIEngine
-from ai.phi_ground import PhiGround
-from ai.openai_client import OpenAIClient
-from automation.action_executor import ActionExecutor
-from core.logger import setup_logger
+from src.core.distributed_device_manager import DistributedDeviceManager, test_distributed_connection
+from src.core.distributed_config import distributed_config
+from src.vision.engine import VisionEngine
+from src.ai.phi_ground import PhiGroundActionGenerator
+from src.ai.openai_client import OpenAIClient
+from src.automation.action_executor import ActionExecutor
+import logging
 
 # Configure logging
-logger = setup_logger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 class DistributedAPKTester:
@@ -73,11 +78,12 @@ class DistributedAPKTester:
         self.device_manager = DistributedDeviceManager(self.local_server_url)
         
         # Initialize vision engine
-        self.vision_engine = VisionAIEngine()
+        self.vision_engine = VisionEngine()
         
         # Initialize AI components
         try:
-            self.phi_ground = PhiGround()
+            self.phi_ground = PhiGroundActionGenerator()
+            await self.phi_ground.initialize()
             logger.info("Phi Ground initialized successfully")
         except Exception as e:
             logger.warning(f"Phi Ground initialization failed: {e}")

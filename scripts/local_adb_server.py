@@ -75,21 +75,21 @@ class ADBResponse(BaseModel):
     timestamp: float = time.time()
 
 
-def run_adb_command(command: List[str], timeout: int = 30) -> Dict[str, Any]:
+def run_adb_command(command: List[str], timeout: int = 30, binary: bool = False) -> Dict[str, Any]:
     """Run ADB command and return result."""
     try:
         logger.info(f"Running ADB command: {' '.join(command)}")
         result = subprocess.run(
             ['adb'] + command,
             capture_output=True,
-            text=True,
+            text=not binary,  # Use binary mode for screenshots
             timeout=timeout
         )
         
         return {
             'success': result.returncode == 0,
-            'stdout': result.stdout.strip(),
-            'stderr': result.stderr.strip(),
+            'stdout': result.stdout,
+            'stderr': result.stderr,
             'returncode': result.returncode
         }
     except subprocess.TimeoutExpired:
@@ -137,14 +137,14 @@ async def take_screenshot(request: ScreenshotRequest):
     """Take screenshot from device."""
     output_path = request.output_path or f"screenshot_{int(time.time())}.png"
     
-    # Use fast screencap method
-    result = run_adb_command(['exec-out', 'screencap -p'], timeout=60)
+    # Use fast screencap method with binary output
+    result = run_adb_command(['exec-out', 'screencap -p'], timeout=60, binary=True)
     
     if result['success']:
         try:
-            # Save screenshot
+            # Save screenshot - binary data
             with open(output_path, 'wb') as f:
-                f.write(result['stdout'].encode('latin1'))
+                f.write(result['stdout'])
             
             return ADBResponse(
                 success=True,

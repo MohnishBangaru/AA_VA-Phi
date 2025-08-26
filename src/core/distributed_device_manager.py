@@ -42,7 +42,9 @@ class DistributedDeviceManager:
             if method.upper() == "GET":
                 response = requests.get(url, **kwargs)
             elif method.upper() == "POST":
-                response = requests.post(url, json=kwargs.get('json'), **kwargs)
+                # Extract json data and remove from kwargs
+                json_data = kwargs.pop('json', None)
+                response = requests.post(url, json=json_data, **kwargs)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -85,7 +87,10 @@ class DistributedDeviceManager:
     def get_devices(self) -> List[Dict[str, str]]:
         """Get connected devices from local ADB server."""
         response = self._make_request("GET", "/devices")
-        if response.get("success", False):
+        # Handle direct list response from FastAPI
+        if isinstance(response, list):
+            return response
+        elif response.get("success", False):
             return response.get("data", [])
         else:
             logger.error(f"Failed to get devices: {response.get('error')}")

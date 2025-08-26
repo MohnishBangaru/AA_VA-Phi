@@ -18,9 +18,10 @@ from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.distributed_device_manager import test_distributed_connection, DistributedDeviceManager
-from core.distributed_config import distributed_config
+from src.core.distributed_device_manager import test_distributed_connection, DistributedDeviceManager
+from src.core.distributed_config import distributed_config
 
 # Configure logging
 logging.basicConfig(
