@@ -111,8 +111,18 @@ class DistributedDeviceManager:
                 import base64
                 return base64.b64decode(screenshot_data)
             else:
-                # Fallback to file path if data not available
-                return response.get("data", {}).get("output_path")
+                # If no base64 data, try to read the file and return bytes
+                file_path = response.get("data", {}).get("output_path")
+                if file_path and Path(file_path).exists():
+                    try:
+                        with open(file_path, 'rb') as f:
+                            return f.read()
+                    except Exception as e:
+                        logger.error(f"Failed to read screenshot file {file_path}: {e}")
+                        return None
+                else:
+                    logger.error("No screenshot data or file path available")
+                    return None
         else:
             logger.error(f"Failed to take screenshot: {response.get('error')}")
             return None

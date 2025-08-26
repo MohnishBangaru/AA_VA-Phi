@@ -137,9 +137,15 @@ class DistributedAPKTester:
             
             # Take initial screenshot
             initial_screenshot = self.device_manager.take_screenshot()
+            logger.info(f"Initial screenshot type: {type(initial_screenshot)}")
             if initial_screenshot:
-                await self._save_screenshot_locally(initial_screenshot, "initial_screenshot.png")
-                self.test_results["screenshots_taken"] += 1
+                screenshot_path = await self._save_screenshot_locally(initial_screenshot, "initial_screenshot.png")
+                if screenshot_path:
+                    self.test_results["screenshots_taken"] += 1
+                else:
+                    logger.error("Failed to save initial screenshot")
+            else:
+                logger.error("Failed to take initial screenshot")
             
             # Perform actions
             for i in range(num_actions):
@@ -148,16 +154,21 @@ class DistributedAPKTester:
                 try:
                     # Take screenshot for analysis
                     screenshot = self.device_manager.take_screenshot()
+                    logger.info(f"Action {i+1} screenshot type: {type(screenshot)}")
                     
                     if screenshot:
                         screenshot_path = await self._save_screenshot_locally(screenshot, f"action_{i+1}_screenshot.png")
-                        self.test_results["screenshots_taken"] += 1
-                        
-                        # Analyze screenshot with vision engine
-                        elements = self.vision_engine.analyze_screenshot(screenshot_path)
-                        
-                        # Generate action using AI
-                        action = await self._generate_action(screenshot_path, elements)
+                        if screenshot_path:
+                            self.test_results["screenshots_taken"] += 1
+                            
+                            # Analyze screenshot with vision engine
+                            elements = self.vision_engine.analyze_screenshot(screenshot_path)
+                            
+                            # Generate action using AI
+                            action = await self._generate_action(screenshot_path, elements)
+                        else:
+                            logger.error(f"Failed to save action {i+1} screenshot")
+                            continue
                         
                         if action:
                             # Execute action
@@ -178,9 +189,15 @@ class DistributedAPKTester:
             
             # Take final screenshot
             final_screenshot = self.device_manager.take_screenshot()
+            logger.info(f"Final screenshot type: {type(final_screenshot)}")
             if final_screenshot:
-                await self._save_screenshot_locally(final_screenshot, "final_screenshot.png")
-                self.test_results["screenshots_taken"] += 1
+                screenshot_path = await self._save_screenshot_locally(final_screenshot, "final_screenshot.png")
+                if screenshot_path:
+                    self.test_results["screenshots_taken"] += 1
+                else:
+                    logger.error("Failed to save final screenshot")
+            else:
+                logger.error("Failed to take final screenshot")
             
             # Uninstall app
             self.device_manager.uninstall_app(package_name)
@@ -271,16 +288,34 @@ class DistributedAPKTester:
         logger.info(f"Success: {self.test_results['success']}")
         logger.info(f"Results saved to: {self.output_dir.absolute()}")
     
-    async def _save_screenshot_locally(self, screenshot_data: bytes, filename: str) -> str:
+    async def _save_screenshot_locally(self, screenshot_data, filename: str) -> str:
         """Save screenshot to local directory."""
         screenshot_path = self.output_dir / filename
         
-        # Save screenshot locally
-        with open(screenshot_path, 'wb') as f:
-            f.write(screenshot_data)
+        # Handle different data types
+        if isinstance(screenshot_data, str):
+            # If it's a file path, read the file
+            try:
+                with open(screenshot_data, 'rb') as f:
+                    screenshot_data = f.read()
+                logger.info(f"Read screenshot from file: {screenshot_data}")
+            except Exception as e:
+                logger.error(f"Failed to read screenshot file {screenshot_data}: {e}")
+                return None
+        elif not isinstance(screenshot_data, bytes):
+            logger.error(f"Unexpected screenshot data type: {type(screenshot_data)}")
+            return None
         
-        logger.info(f"Screenshot saved: {screenshot_path}")
-        return str(screenshot_path)
+        # Save screenshot locally
+        try:
+            with open(screenshot_path, 'wb') as f:
+                f.write(screenshot_data)
+            
+            logger.info(f"Screenshot saved: {screenshot_path}")
+            return str(screenshot_path)
+        except Exception as e:
+            logger.error(f"Failed to save screenshot: {e}")
+            return None
 
 
 async def main():
