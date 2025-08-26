@@ -12,20 +12,24 @@ import sys
 import subprocess
 from pathlib import Path
 
-def run_command(command: str, description: str) -> bool:
+def run_command(command: str, description: str, silent: bool = False) -> bool:
     """Run a command and return success status."""
-    print(f"🔧 {description}...")
+    if not silent:
+        print(f"🔧 {description}...")
     try:
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f"✅ {description} - Success")
+            if not silent:
+                print(f"✅ {description} - Success")
             return True
         else:
-            print(f"❌ {description} - Failed")
-            print(f"Error: {result.stderr}")
+            if not silent:
+                print(f"❌ {description} - Failed")
+                print(f"Error: {result.stderr}")
             return False
     except Exception as e:
-        print(f"❌ {description} - Exception: {e}")
+        if not silent:
+            print(f"❌ {description} - Exception: {e}")
         return False
 
 def fix_transformers_issue():
@@ -43,6 +47,15 @@ def fix_transformers_issue():
         run_command("pip install --upgrade accelerate", "Updating accelerate")
         run_command("pip install --upgrade safetensors", "Updating safetensors")
         run_command("pip install --upgrade huggingface-hub", "Updating huggingface-hub")
+        
+        # Try to install FlashAttention2 (optional)
+        print("🔄 Attempting to install FlashAttention2 for GPU acceleration...")
+        flash_result = run_command("pip install --upgrade flash-attn", "Installing FlashAttention2 for GPU acceleration", silent=True)
+        if flash_result:
+            print("✅ FlashAttention2 installed successfully")
+        else:
+            print("⚠️ FlashAttention2 installation failed - will use standard attention")
+            print("   This is normal and the system will work without GPU acceleration")
     
     return success
 

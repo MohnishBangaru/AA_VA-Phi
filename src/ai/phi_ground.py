@@ -51,14 +51,31 @@ class PhiGroundActionGenerator:
             logger.info(f"Initializing Phi Ground model: {self.model_name}")
             logger.info(f"Using device: {self.device}")
             
-            # Load tokenizer and model
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                device_map="auto" if self.device == "cuda" else None,
-                trust_remote_code=True
-            )
+            # Try to load model with FlashAttention2 first
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    device_map="auto" if self.device == "cuda" else None,
+                    trust_remote_code=True
+                )
+                logger.info("Phi Ground model initialized with FlashAttention2")
+            except Exception as flash_error:
+                if "flash_attn" in str(flash_error) or "FlashAttention2" in str(flash_error):
+                    logger.warning("FlashAttention2 not available, falling back to standard attention")
+                    # Retry without FlashAttention2
+                    self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                        device_map="auto" if self.device == "cuda" else None,
+                        trust_remote_code=True,
+                        attn_implementation="eager"  # Disable FlashAttention2
+                    )
+                    logger.info("Phi Ground model initialized with standard attention")
+                else:
+                    raise flash_error
             
             if self.device == "cpu":
                 self.model = self.model.to(self.device)
