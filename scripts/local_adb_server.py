@@ -146,9 +146,12 @@ async def take_screenshot(request: ScreenshotRequest):
             with open(output_path, 'wb') as f:
                 f.write(result['stdout'])
             
+            logger.info(f"Screenshot saved to file: {output_path}, size: {len(result['stdout'])} bytes")
+            
             # Return both file path and base64 data
             import base64
             screenshot_data = base64.b64encode(result['stdout']).decode('utf-8')
+            logger.info(f"Base64 encoded screenshot data length: {len(screenshot_data)}")
             
             response_data = {
                 'output_path': output_path, 
@@ -156,11 +159,16 @@ async def take_screenshot(request: ScreenshotRequest):
                 'screenshot_data': screenshot_data
             }
             
+            logger.info(f"Screenshot response data keys: {list(response_data.keys())}")
             logger.info(f"Screenshot taken successfully: {output_path}, size: {len(result['stdout'])} bytes")
-            return ADBResponse(
+            
+            response = ADBResponse(
                 success=True,
                 data=response_data
             )
+            logger.info(f"ADBResponse created with data keys: {list(response.data.keys()) if response.data else 'None'}")
+            logger.info(f"ADBResponse screenshot_data present: {'screenshot_data' in response.data if response.data else False}")
+            return response
         except Exception as e:
             logger.error(f"Screenshot save failed: {e}")
             return ADBResponse(success=False, error=str(e))
