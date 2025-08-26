@@ -153,9 +153,13 @@ def test_components():
         import openai
         print("✅ OpenAI package available")
         
-        # Test if API key is configured
-        from src.core.config import config
-        if config.openai_api_key:
+        # Test if API key is configured (without importing src)
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if api_key:
             print("✅ OpenAI API key configured")
         else:
             print("⚠️  OpenAI API key not configured (will use fallback)")
