@@ -163,7 +163,7 @@ class DistributedAPKTester:
                             self.test_results["screenshots_taken"] += 1
                             
                             # Analyze screenshot with vision engine
-                            elements = self.vision_engine.analyze_screenshot(screenshot_path)
+                            elements = self.vision_engine.analyze(screenshot_path)
                             
                             # Generate action using AI
                             action = await self._generate_action(screenshot_path, elements)
@@ -218,7 +218,12 @@ class DistributedAPKTester:
         try:
             if self.phi_ground:
                 # Use Phi Ground for action generation
-                action = await self.phi_ground.generate_action(screenshot_path, elements)
+                action = await self.phi_ground.generate_touch_action(
+                    screenshot_path, 
+                    "Automate app interaction", 
+                    [],  # Empty action history for now
+                    elements
+                )
                 return action
             elif self.openai_client:
                 # Fallback to OpenAI
