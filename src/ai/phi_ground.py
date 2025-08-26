@@ -30,7 +30,7 @@ from ..vision.models import UIElement, BoundingBox
 class PhiGroundActionGenerator:
     """Phi Ground action generator for Android touch automation."""
     
-    def __init__(self, model_name: str = "microsoft/Phi-3-mini-128k-instruct"):
+    def __init__(self, model_name: str = "microsoft/Phi-3-vision-128k-instruct"):
         """Initialize Phi Ground action generator.
         
         Args:
@@ -238,6 +238,7 @@ Please analyze this Android app screenshot and suggest the next touch action to 
         try:
             # Load and preprocess image
             image = Image.open(image_path).convert('RGB')
+            logger.info(f"Loaded screenshot: {image_path} (size: {image.size})")
             
             # Create Phi Ground prompt
             prompt = self._create_phi_ground_prompt(
@@ -247,6 +248,7 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             # Tokenize input - handle vision-language model tokenization
             if self.vision_supported:
                 try:
+                    logger.info("Using vision tokenization with screenshot")
                     inputs = self.tokenizer(
                         prompt,
                         return_tensors="pt",
@@ -265,6 +267,7 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     ).to(self.device)
             else:
                 # Use text-only tokenization with proper attention mask
+                logger.info("Using text-only tokenization (no screenshot processing)")
                 inputs = self.tokenizer(
                     prompt,
                     return_tensors="pt",
