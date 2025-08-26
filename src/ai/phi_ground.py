@@ -62,18 +62,27 @@ class PhiGroundActionGenerator:
                 )
                 logger.info("Phi Ground model initialized with FlashAttention2")
             except Exception as flash_error:
-                if "flash_attn" in str(flash_error) or "FlashAttention2" in str(flash_error):
-                    logger.warning("FlashAttention2 not available, falling back to standard attention")
+                if ("flash_attn" in str(flash_error) or 
+                    "FlashAttention2" in str(flash_error) or 
+                    "undefined symbol" in str(flash_error) or
+                    "flash_attn_2_cuda" in str(flash_error)):
+                    logger.warning("FlashAttention2 not available or has compatibility issues, falling back to standard attention")
+                    logger.warning(f"FlashAttention2 error: {flash_error}")
+                    
                     # Retry without FlashAttention2
-                    self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        self.model_name,
-                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                        device_map="auto" if self.device == "cuda" else None,
-                        trust_remote_code=True,
-                        attn_implementation="eager"  # Disable FlashAttention2
-                    )
-                    logger.info("Phi Ground model initialized with standard attention")
+                    try:
+                        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                            device_map="auto" if self.device == "cuda" else None,
+                            trust_remote_code=True,
+                            attn_implementation="eager"  # Disable FlashAttention2
+                        )
+                        logger.info("Phi Ground model initialized with standard attention")
+                    except Exception as fallback_error:
+                        logger.error(f"Standard attention fallback also failed: {fallback_error}")
+                        raise fallback_error
                 else:
                     raise flash_error
             
