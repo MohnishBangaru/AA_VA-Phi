@@ -98,22 +98,19 @@ class PhiGroundActionGenerator:
                 self.vision_supported = False
                 logger.warning(f"Vision support check failed: {e}, using text-only mode")
             
-            # Try optimized initialization strategies (fastest first)
+            # Standard initialization strategies
             initialization_strategies = [
-                # Strategy 1: Fast CPU loading (fastest for local testing)
+                # Strategy 1: CUDA with FlashAttention2 (optimal)
                 {
-                    "name": "Fast CPU Loading",
+                    "name": "CUDA FlashAttention2",
                     "kwargs": {
-                        "torch_dtype": torch.float32,
-                        "device_map": None,
+                        "torch_dtype": torch.float16,
+                        "device_map": "auto",
                         "trust_remote_code": True,
-                        "attn_implementation": "eager",
-                        "low_cpu_mem_usage": True,
-                        "load_in_8bit": False,
-                        "load_in_4bit": False
+                        "low_cpu_mem_usage": True
                     }
                 },
-                # Strategy 2: CUDA without FlashAttention2 (fast for RunPod)
+                # Strategy 2: CUDA without FlashAttention2 (fallback)
                 {
                     "name": "CUDA Standard",
                     "kwargs": {
@@ -124,13 +121,14 @@ class PhiGroundActionGenerator:
                         "low_cpu_mem_usage": True
                     }
                 },
-                # Strategy 3: CUDA with FlashAttention2 (only if available)
+                # Strategy 3: CPU fallback (last resort)
                 {
-                    "name": "CUDA FlashAttention2",
+                    "name": "CPU Fallback",
                     "kwargs": {
-                        "torch_dtype": torch.float16,
-                        "device_map": "auto",
+                        "torch_dtype": torch.float32,
+                        "device_map": None,
                         "trust_remote_code": True,
+                        "attn_implementation": "eager",
                         "low_cpu_mem_usage": True
                     }
                 }
@@ -147,14 +145,10 @@ class PhiGroundActionGenerator:
                         config.use_flash_attention_2 = False
                         logger.info(f"Disabled FlashAttention2 in model config for {strategy['name']}")
                         
-                        # Remove use_flash_attention_2 from kwargs if present
-                        kwargs = strategy['kwargs'].copy()
-                        kwargs.pop('use_flash_attention_2', None)
-                        
                         self.model = AutoModelForCausalLM.from_pretrained(
                             self.model_name,
                             config=config,
-                            **kwargs
+                            **strategy['kwargs']
                         )
                     else:
                         self.model = AutoModelForCausalLM.from_pretrained(
@@ -162,11 +156,11 @@ class PhiGroundActionGenerator:
                             **strategy['kwargs']
                         )
                     
-                    # Move to CPU if using CPU strategy
-                    if strategy['name'] == "Fast CPU Loading":
+                    # Move to CPU if using CPU fallback strategy
+                    if strategy['name'] == "CPU Fallback":
                         self.device = "cpu"
                         self.model = self.model.to("cpu")
-                        logger.info("Model moved to CPU for Fast CPU Loading strategy")
+                        logger.info("Model moved to CPU for CPU Fallback strategy")
                     
                     logger.info(f"Phi Ground model initialized successfully with {strategy['name']}")
                     break
