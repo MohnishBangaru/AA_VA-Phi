@@ -18,7 +18,7 @@ import flash_attn
 x = torch.randn(2, 4, 8, 16, device='cuda', dtype=torch.float16)
 output = flash_attn.flash_attn_func(x, x, x)
 print('Flash Attention 2 is working!')
-" 2>/dev/null; then
+" 2>/dev/null | grep -q "Flash Attention 2 is working!"; then
         echo "✅ Flash Attention 2 is working correctly"
         exit 0
     else
@@ -47,7 +47,7 @@ import flash_attn
 x = torch.randn(2, 4, 8, 16, device='cuda', dtype=torch.float16)
 output = flash_attn.flash_attn_func(x, x, x)
 print('Flash Attention 2 is working!')
-" 2>/dev/null; then
+" 2>/dev/null | grep -q "Flash Attention 2 is working!"; then
     echo "✅ Flash Attention 2 fixed successfully!"
 else
     echo "❌ Flash Attention 2 still has issues"

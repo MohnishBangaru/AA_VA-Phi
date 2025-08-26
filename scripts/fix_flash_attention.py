@@ -96,13 +96,13 @@ if torch.cuda.is_available():
         # Test flash attention function
         output = flash_attn.flash_attn_func(x, x, x)
         print("Flash Attention test successful!")
-        return True
+        print("SUCCESS")
     except Exception as e:
         print(f"Flash Attention test failed: {e}")
-        return False
+        print("FAILED")
 else:
     print("CUDA not available for testing")
-    return False
+    print("FAILED")
 """
     
     # Write test code to a temporary file
@@ -116,7 +116,7 @@ else:
         print(result.stdout)
         if result.stderr:
             print(f"Errors: {result.stderr}")
-        return result.returncode == 0
+        return "SUCCESS" in result.stdout
     finally:
         if os.path.exists(test_file):
             os.remove(test_file)
