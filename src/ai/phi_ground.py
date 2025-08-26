@@ -184,26 +184,32 @@ You are an Android automation assistant. Analyze the screenshot and generate app
 Task: {task_description}
 {history_text}
 
-Generate actions in this format:
+You must respond with exactly one action in this format:
 1. TAP: [element_description] at coordinates (x, y)
 2. INPUT: [text] into [field_description] at coordinates (x, y)
 3. SWIPE: from (x1, y1) to (x2, y2)
 4. WAIT: [duration] seconds
 
-Only generate one action at a time. Prioritize:
+Rules:
+- Always start with a number (1.)
+- Use exact format: "1. TAP: [description] at coordinates (x, y)"
+- Coordinates should be integers between 100-1000
+- Focus on visible, clickable elements
+- Avoid system UI (status bar, navigation bar)
+- If no clear action, use "1. WAIT: 2 seconds"
+
+Prioritize:
 1. Text input fields that need to be filled
 2. Primary action buttons (Continue, Submit, Next, etc.)
 3. Interactive elements (buttons, links, etc.)
 4. Navigation elements as last resort
-
-Coordinates should be within the app area (avoid status bar, navigation bar).
 <|im_end|>
 <|im_start|>user
 <|image|>
 Please analyze this Android app screenshot and suggest the next touch action to accomplish the task.
 <|im_end|>
 <|im_start|>assistant
-"""
+1. """
         
         return prompt
     
@@ -243,20 +249,26 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     inputs = self.tokenizer(
                         prompt,
                         return_tensors="pt",
-                        images=image
+                        images=image,
+                        padding=True,
+                        truncation=True
                     ).to(self.device)
                 except Exception as e:
                     logger.warning(f"Vision tokenization failed: {e}, falling back to text-only")
                     self.vision_supported = False
                     inputs = self.tokenizer(
                         prompt,
-                        return_tensors="pt"
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True
                     ).to(self.device)
             else:
-                # Use text-only tokenization
+                # Use text-only tokenization with proper attention mask
                 inputs = self.tokenizer(
                     prompt,
-                    return_tensors="pt"
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True
                 ).to(self.device)
             
             # Generate response with robust caching fixes
@@ -342,12 +354,15 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             
             # Decode response
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            logger.debug(f"Phi Ground raw response: {response}")
             
             # Extract action from response
             action = self._parse_phi_ground_response(response, ui_elements)
             
             if action:
                 logger.info(f"Phi Ground generated action: {action['type']} - {action.get('reasoning', '')}")
+            else:
+                logger.warning(f"No valid action parsed from response: {response[:200]}...")
             
             return action
             
@@ -370,14 +385,21 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             Parsed action dictionary or None
         """
         try:
-            # Extract action from response
-            action_match = re.search(r'(\d+)\.\s*(TAP|INPUT|SWIPE|WAIT):\s*(.+)', response, re.IGNORECASE)
+            # Extract action from response - more flexible regex
+            action_match = re.search(r'(\d+)\.?\s*(TAP|INPUT|SWIPE|WAIT):?\s*(.+)', response, re.IGNORECASE)
             if not action_match:
-                logger.warning("Could not parse Phi Ground response")
-                return None
-            
-            action_type = action_match.group(2).upper()
-            action_description = action_match.group(3).strip()
+                # Try alternative patterns
+                action_match = re.search(r'(TAP|INPUT|SWIPE|WAIT):?\s*(.+)', response, re.IGNORECASE)
+                if not action_match:
+                    logger.warning(f"Could not parse Phi Ground response: {response[:200]}...")
+                    return None
+                else:
+                    # Use default number 1 if not found
+                    action_type = action_match.group(1).upper()
+                    action_description = action_match.group(2).strip()
+            else:
+                action_type = action_match.group(2).upper()
+                action_description = action_match.group(3).strip()
             
             if action_type == "TAP":
                 return self._parse_tap_action(action_description, ui_elements)
