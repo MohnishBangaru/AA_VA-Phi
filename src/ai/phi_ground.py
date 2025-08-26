@@ -30,7 +30,7 @@ from ..vision.models import UIElement, BoundingBox
 class PhiGroundActionGenerator:
     """Phi Ground action generator for Android touch automation."""
     
-    def __init__(self, model_name: str = "microsoft/Phi-3-vision-128k-instruct"):
+    def __init__(self, model_name: str = "microsoft/Phi-3-mini-128k-instruct"):
         """Initialize Phi Ground action generator.
         
         Args:
@@ -41,6 +41,7 @@ class PhiGroundActionGenerator:
         self.model = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._initialized = False
+        self.vision_supported = False
         
     async def initialize(self) -> None:
         """Initialize the Phi Ground model."""
@@ -52,7 +53,22 @@ class PhiGroundActionGenerator:
             logger.info(f"Using device: {self.device}")
             
             # Load tokenizer first
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+            
+            # Check if vision is supported
+            try:
+                from PIL import Image
+                import numpy as np
+                dummy_image = Image.fromarray(np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8))
+                test_inputs = self.tokenizer("test", return_tensors="pt", images=dummy_image)
+                self.vision_supported = True
+                logger.info("Vision tokenization supported")
+            except (TypeError, AttributeError):
+                self.vision_supported = False
+                logger.info("Vision tokenization not supported, using text-only mode")
+            except Exception as e:
+                self.vision_supported = False
+                logger.warning(f"Vision support check failed: {e}, using text-only mode")
             
             # Try multiple initialization strategies
             initialization_strategies = [
@@ -209,22 +225,50 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 image_path, task_description, action_history
             )
             
-            # Tokenize input
-            inputs = self.tokenizer(
-                prompt,
-                return_tensors="pt",
-                images=image
-            ).to(self.device)
+            # Tokenize input - handle vision-language model tokenization
+            if self.vision_supported:
+                try:
+                    inputs = self.tokenizer(
+                        prompt,
+                        return_tensors="pt",
+                        images=image
+                    ).to(self.device)
+                except Exception as e:
+                    logger.warning(f"Vision tokenization failed: {e}, falling back to text-only")
+                    self.vision_supported = False
+                    inputs = self.tokenizer(
+                        prompt,
+                        return_tensors="pt"
+                    ).to(self.device)
+            else:
+                # Use text-only tokenization
+                inputs = self.tokenizer(
+                    prompt,
+                    return_tensors="pt"
+                ).to(self.device)
             
             # Generate response
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=256,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
+                try:
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=256,
+                        temperature=0.7,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Model generation failed with vision inputs: {e}")
+                    # Fallback to text-only generation
+                    logger.info("Falling back to text-only generation")
+                    outputs = self.model.generate(
+                        input_ids=inputs.get('input_ids'),
+                        attention_mask=inputs.get('attention_mask'),
+                        max_new_tokens=256,
+                        temperature=0.7,
+                        do_sample=True,
+                        pad_token_id=self.tokenizer.eos_token_id
+                    )
             
             # Decode response
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
