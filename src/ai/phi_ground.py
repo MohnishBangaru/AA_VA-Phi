@@ -81,11 +81,12 @@ class PhiGroundActionGenerator:
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
                         "low_cpu_mem_usage": True,
+                        "use_flash_attention_2": False,
                         "load_in_8bit": False,
                         "load_in_4bit": False
                     }
                 },
-                # Strategy 2: CUDA standard (fast for RunPod)
+                # Strategy 2: CUDA without FlashAttention2 (fast for RunPod)
                 {
                     "name": "CUDA Standard",
                     "kwargs": {
@@ -93,12 +94,13 @@ class PhiGroundActionGenerator:
                         "device_map": "auto",
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
+                        "use_flash_attention_2": False,
                         "low_cpu_mem_usage": True
                     }
                 },
-                # Strategy 3: CUDA minimal (fallback)
+                # Strategy 3: CUDA with FlashAttention2 (only if available)
                 {
-                    "name": "CUDA Minimal",
+                    "name": "CUDA FlashAttention2",
                     "kwargs": {
                         "torch_dtype": torch.float16,
                         "device_map": "auto",
@@ -112,20 +114,30 @@ class PhiGroundActionGenerator:
                 try:
                     logger.info(f"Trying initialization strategy: {strategy['name']}")
                     
-                    # Disable FlashAttention2 in config for all strategies to avoid compatibility issues
-                    from transformers import AutoConfig
-                    config = AutoConfig.from_pretrained(self.model_name, trust_remote_code=True)
-                    config.use_flash_attention_2 = False
-                    logger.info(f"Disabled FlashAttention2 in model config for {strategy['name']}")
+                    # For strategies that need to disable FlashAttention2, modify the config first
+                    if strategy['name'] != "CUDA FlashAttention2":
+                        from transformers import AutoConfig
+                        config = AutoConfig.from_pretrained(self.model_name, trust_remote_code=True)
+                        config.use_flash_attention_2 = False
+                        logger.info(f"Disabled FlashAttention2 in model config for {strategy['name']}")
+                        
+                        # Remove use_flash_attention_2 from kwargs if present
+                        kwargs = strategy['kwargs'].copy()
+                        kwargs.pop('use_flash_attention_2', None)
+                        
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            config=config,
+                            **kwargs
+                        )
+                    else:
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            **strategy['kwargs']
+                        )
                     
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        self.model_name,
-                        config=config,
-                        **strategy['kwargs']
-                    )
-                    
-                    # Move to CPU if using CPU strategy
-                    if strategy['name'] == "Fast CPU Loading":
+                    # Move to CPU if using CPU fallback strategy
+                    if strategy['name'] == "CPU Fallback":
                         self.device = "cpu"
                         self.model = self.model.to("cpu")
                     
