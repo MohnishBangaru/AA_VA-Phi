@@ -72,7 +72,7 @@ class PhiGroundActionGenerator:
             
             # Try multiple initialization strategies
             initialization_strategies = [
-                # Strategy 1: Try with FlashAttention2 (default)
+                # Strategy 1: Try with FlashAttention2 (default) - only if available
                 {
                     "name": "FlashAttention2",
                     "kwargs": {
@@ -81,17 +81,18 @@ class PhiGroundActionGenerator:
                         "trust_remote_code": True
                     }
                 },
-                # Strategy 2: Try with standard attention (eager)
+                # Strategy 2: Try with standard attention (eager) - explicitly disable FlashAttention2
                 {
                     "name": "Standard Attention (eager)",
                     "kwargs": {
                         "torch_dtype": torch.float16 if self.device == "cuda" else torch.float32,
                         "device_map": "auto" if self.device == "cuda" else None,
                         "trust_remote_code": True,
-                        "attn_implementation": "eager"
+                        "attn_implementation": "eager",
+                        "use_flash_attention_2": False
                     }
                 },
-                # Strategy 3: Try with minimal configuration
+                # Strategy 3: Try with minimal configuration - explicitly disable FlashAttention2
                 {
                     "name": "Minimal Configuration",
                     "kwargs": {
@@ -99,10 +100,11 @@ class PhiGroundActionGenerator:
                         "device_map": None,
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
-                        "low_cpu_mem_usage": True
+                        "low_cpu_mem_usage": True,
+                        "use_flash_attention_2": False
                     }
                 },
-                # Strategy 4: Try with CPU fallback
+                # Strategy 4: Try with CPU fallback - explicitly disable FlashAttention2
                 {
                     "name": "CPU Fallback",
                     "kwargs": {
@@ -110,7 +112,8 @@ class PhiGroundActionGenerator:
                         "device_map": None,
                         "trust_remote_code": True,
                         "attn_implementation": "eager",
-                        "low_cpu_mem_usage": True
+                        "low_cpu_mem_usage": True,
+                        "use_flash_attention_2": False
                     }
                 }
             ]
@@ -118,10 +121,24 @@ class PhiGroundActionGenerator:
             for strategy in initialization_strategies:
                 try:
                     logger.info(f"Trying initialization strategy: {strategy['name']}")
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        self.model_name,
-                        **strategy['kwargs']
-                    )
+                    
+                    # For strategies that need to disable FlashAttention2, modify the config first
+                    if strategy['name'] != "FlashAttention2":
+                        from transformers import AutoConfig
+                        config = AutoConfig.from_pretrained(self.model_name, trust_remote_code=True)
+                        config.use_flash_attention_2 = False
+                        logger.info(f"Disabled FlashAttention2 in model config for {strategy['name']}")
+                        
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            config=config,
+                            **strategy['kwargs']
+                        )
+                    else:
+                        self.model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            **strategy['kwargs']
+                        )
                     
                     # Move to CPU if using CPU fallback strategy
                     if strategy['name'] == "CPU Fallback":

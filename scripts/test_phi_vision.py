@@ -34,16 +34,28 @@ async def test_phi_vision():
         print(f"📊 Model: {phi_ground.model_name}")
         print(f"👁️  Vision Supported: {phi_ground.vision_supported}")
         
-        # Test with a dummy image path (you can replace with actual screenshot)
-        test_image_path = "test_screenshot.png"
+        # Test with an existing screenshot
+        test_image_path = "screenshot_1756248771.png"  # Use an existing screenshot
         
-        if Path(test_image_path).exists():
+        if not Path(test_image_path).exists():
+            # Try to find any screenshot file
+            import os
+            screenshot_files = [f for f in os.listdir(".") if f.startswith("screenshot_") and f.endswith(".png")]
+            if screenshot_files:
+                test_image_path = screenshot_files[0]
+                print(f"📸 Using existing screenshot: {test_image_path}")
+            else:
+                print(f"⚠️  No screenshot files found")
+                print("   Create a test screenshot or use an existing one")
+                test_image_path = None
+        
+        if test_image_path and Path(test_image_path).exists():
             print(f"📸 Testing with screenshot: {test_image_path}")
             
             # Test action generation
             action = await phi_ground.generate_touch_action(
                 image_path=test_image_path,
-                task_description="Test task",
+                task_description="Test task - find and tap on any button or interactive element",
                 action_history=[],
                 ui_elements=[]
             )
@@ -53,9 +65,6 @@ async def test_phi_vision():
             else:
                 print("❌ No action generated")
         else:
-            print(f"⚠️  Test screenshot not found: {test_image_path}")
-            print("   Create a test screenshot or use an existing one")
-            
             # Test with vision support check only
             print("\n🔍 Vision Support Details:")
             print(f"   Model: {phi_ground.model_name}")
