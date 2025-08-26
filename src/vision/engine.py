@@ -75,11 +75,36 @@ class VisionEngine:
     # ------------------------------------------------------------------
     def analyze(self, image_path: str) -> list[UIElement]:
         """Return list of detected `UIElement` objects from the screenshot."""
-        if not self._ocr_available:
-            return []  # OCR disabled, return empty list
-
         if not os.path.exists(image_path):
             logger.error(f"Screenshot not found: {image_path}")
+            return []
+
+        # Try OmniParser first if available
+        if hasattr(self, '_omniparser_available') and self._omniparser_available:
+            try:
+                logger.info("Using OmniParser for advanced UI element detection")
+                elements = self.omniparser_engine.analyze_screenshot(image_path)
+                
+                if elements:
+                    # Get summary for logging
+                    summary = self.omniparser_engine.get_element_summary(elements)
+                    logger.info(f"OmniParser detected {summary['total_elements']} elements: "
+                              f"{summary['text_elements']} text, {summary['clickable_elements']} clickable, "
+                              f"{summary['button_elements']} buttons, {summary['input_elements']} inputs")
+                    
+                    # Filter for interactive elements only
+                    interactive_elements = self._filter_interactive_elements(elements)
+                    logger.debug(f"OmniParser total interactive elements: {len(interactive_elements)}")
+                    return interactive_elements
+                else:
+                    logger.warning("OmniParser returned no elements, falling back to OCR")
+                    
+            except Exception as e:
+                logger.warning(f"OmniParser analysis failed: {e}, falling back to OCR")
+        
+        # Fallback to OCR
+        if not self._ocr_available:
+            logger.warning("OCR not available, no elements detected")
             return []
 
         image = cv2.imread(image_path)
