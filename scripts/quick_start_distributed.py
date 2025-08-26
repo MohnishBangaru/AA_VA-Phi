@@ -33,9 +33,14 @@ logger = logging.getLogger(__name__)
 
 async def test_connectivity(local_ip: str, port: int = 8000):
     """Test connectivity to local ADB server."""
-    logger.info(f"Testing connectivity to {local_ip}:{port}")
+    # Handle both full URLs and just hostnames
+    if local_ip.startswith(('http://', 'https://')):
+        url = local_ip
+        logger.info(f"Testing connectivity to {url}")
+    else:
+        url = f"http://{local_ip}:{port}"
+        logger.info(f"Testing connectivity to {url}")
     
-    url = f"http://{local_ip}:{port}"
     success = await test_distributed_connection(url)
     
     if success:
@@ -50,7 +55,11 @@ async def test_device_operations(local_ip: str, port: int = 8000):
     """Test basic device operations."""
     logger.info("Testing device operations...")
     
-    url = f"http://{local_ip}:{port}"
+    # Handle both full URLs and just hostnames
+    if local_ip.startswith(('http://', 'https://')):
+        url = local_ip
+    else:
+        url = f"http://{local_ip}:{port}"
     
     try:
         async with DistributedDeviceManager(url) as manager:
@@ -177,7 +186,7 @@ def print_setup_instructions(local_ip: str):
 4. RUN DISTRIBUTED TEST:
    python scripts/distributed_apk_tester.py \\
        --apk /path/to/app.apk \\
-       --local-server http://{local_ip}:8000 \\
+       --local-server {local_ip} \\
        --actions 10
 
 📚 For detailed instructions, see: DISTRIBUTED_SETUP_GUIDE.md
