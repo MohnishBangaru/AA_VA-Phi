@@ -148,15 +148,20 @@ async def take_screenshot(request: ScreenshotRequest):
             
             logger.info(f"Screenshot saved to file: {output_path}, size: {len(result['stdout'])} bytes")
             
-            # Return both file path and base64 data
+            # Return both file path and base64 data (compressed for transmission)
             import base64
-            screenshot_data = base64.b64encode(result['stdout']).decode('utf-8')
-            logger.info(f"Base64 encoded screenshot data length: {len(screenshot_data)}")
+            import gzip
+            
+            # Compress the screenshot data to reduce transmission size
+            compressed_data = gzip.compress(result['stdout'])
+            screenshot_data = base64.b64encode(compressed_data).decode('utf-8')
+            logger.info(f"Original size: {len(result['stdout'])}, Compressed base64 length: {len(screenshot_data)}")
             
             response_data = {
                 'output_path': output_path, 
                 'size': len(result['stdout']),
-                'screenshot_data': screenshot_data
+                'screenshot_data': screenshot_data,
+                'compressed': True
             }
             
             logger.info(f"Screenshot response data keys: {list(response_data.keys())}")
