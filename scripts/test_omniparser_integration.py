@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_omniparser_basic():
-    """Test basic OMniParser functionality."""
-    print("🔍 Testing Basic OMniParser Functionality")
+    """Test basic OmniParser 2.0 functionality."""
+    print("🔍 Testing Basic OmniParser 2.0 Functionality")
     print("=" * 50)
     
     try:
@@ -25,16 +25,16 @@ def test_omniparser_basic():
         
         # Check availability
         is_available = omniparser.is_available()
-        print(f"OMniParser Available: {'✅ YES' if is_available else '❌ NO'}")
+        print(f"OmniParser 2.0 Available: {'✅ YES' if is_available else '❌ NO'}")
         
         if not is_available:
-            print("⚠️  OMniParser not available. Check API key and connection.")
+            print("⚠️  OmniParser 2.0 not available. Check model loading and dependencies.")
             return False
         
         return True
         
     except Exception as e:
-        print(f"❌ Basic OMniParser test failed: {e}")
+        print(f"❌ Basic OmniParser 2.0 test failed: {e}")
         return False
 
 def test_omniparser_analysis():

@@ -33,18 +33,18 @@ class VisionEngine:
         # Use a thread pool for OCR to avoid blocking event loop.
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-        # Initialize OMniParser integration
+        # Initialize OmniParser 2.0 integration
         self._omniparser_available: bool = False
         try:
             from .omniparser_integration import create_omniparser_integration
             self.omniparser = create_omniparser_integration()
             self._omniparser_available = self.omniparser.is_available()
             if self._omniparser_available:
-                logger.info("✅ VisionEngine: OMniParser integration available")
+                logger.info("✅ VisionEngine: OmniParser 2.0 integration available")
             else:
-                logger.info("ℹ️  VisionEngine: OMniParser not available (no API key or connection failed)")
+                logger.info("ℹ️  VisionEngine: OmniParser 2.0 not available (model loading failed)")
         except Exception as e:
-            logger.warning(f"VisionEngine: OMniParser integration failed: {e}")
+            logger.warning(f"VisionEngine: OmniParser 2.0 integration failed: {e}")
             self.omniparser = None
 
         # Check if OCR should be enabled and Tesseract is present
@@ -95,26 +95,26 @@ class VisionEngine:
             logger.error(f"Screenshot not found: {image_path}")
             return []
 
-        # Try OMniParser first (if available)
+        # Try OmniParser 2.0 first (if available)
         if self._omniparser_available and self.omniparser:
             try:
-                logger.info("🔍 Using OMniParser for UI element detection...")
+                logger.info("🔍 Using OmniParser 2.0 for UI element detection...")
                 omniparser_elements = self.omniparser.analyze_screenshot(image_path)
                 elements.extend(omniparser_elements)
-                logger.info(f"✅ OMniParser detected {len(omniparser_elements)} elements")
+                logger.info(f"✅ OmniParser 2.0 detected {len(omniparser_elements)} elements")
                 
-                # If OMniParser found elements, filter and return them
+                # If OmniParser 2.0 found elements, filter and return them
                 if omniparser_elements:
                     interactive_elements = self._filter_interactive_elements(elements)
                     logger.debug(f"VisionEngine total interactive elements: {len(interactive_elements)}")
                     return interactive_elements
                     
             except Exception as e:
-                logger.warning(f"OMniParser analysis failed: {e}, falling back to OCR")
+                logger.warning(f"OmniParser 2.0 analysis failed: {e}, falling back to OCR")
 
-        # Fallback to OCR if OMniParser is not available or failed
+        # Fallback to OCR if OmniParser 2.0 is not available or failed
         if not self._ocr_available:
-            logger.warning("No OCR or OMniParser available, returning empty list")
+            logger.warning("No OCR or OmniParser 2.0 available, returning empty list")
             return elements
 
         image = cv2.imread(image_path)

@@ -1,19 +1,18 @@
 """
-OMniParser Integration for Enhanced UI Element Detection
-=======================================================
+OMniParser 2.0 Integration for Enhanced UI Element Detection
+===========================================================
 
-This module integrates OMniParser for advanced UI element detection,
+This module integrates OmniParser 2.0 via Hugging Face for advanced UI element detection,
 text extraction, and layout analysis in Android screenshots.
 """
 
 import logging
 import json
-import requests
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import base64
 from PIL import Image
-import io
+import torch
+import numpy as np
 
 from .ui_elements import UIElement, BoundingBox
 
@@ -21,52 +20,69 @@ logger = logging.getLogger(__name__)
 
 
 class OMniParserIntegration:
-    """Integration with OMniParser for advanced UI analysis."""
+    """Integration with OmniParser 2.0 via Hugging Face for advanced UI analysis."""
     
-    def __init__(self, api_key: str = None, base_url: str = "https://api.omniparser.ai"):
-        """Initialize OMniParser integration.
+    def __init__(self, model_name: str = "microsoft/OmniParser-v2.0", device: str = None):
+        """Initialize OmniParser 2.0 integration.
         
         Args:
-            api_key: OMniParser API key (can be set via environment variable OMNIPARSER_API_KEY)
-            base_url: OMniParser API base URL
+            model_name: Hugging Face model name for OmniParser 2.0
+            device: Device to run the model on ('cuda', 'cpu', or None for auto)
         """
-        self.api_key = api_key or self._get_api_key()
-        self.base_url = base_url.rstrip('/')
-        self.session = requests.Session()
+        self.model_name = model_name
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = None
+        self.processor = None
+        self.tokenizer = None
         
-        if self.api_key:
-            self.session.headers.update({
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
-            })
-        
-        self._available = self._test_connection()
+        self._available = self._initialize_model()
     
-    def _get_api_key(self) -> Optional[str]:
-        """Get API key from environment variable."""
-        import os
-        return os.getenv('OMNIPARSER_API_KEY')
-    
-    def _test_connection(self) -> bool:
-        """Test connection to OMniParser API."""
+    def _initialize_model(self) -> bool:
+        """Initialize the OmniParser 2.0 model from Hugging Face."""
         try:
-            response = self.session.get(f"{self.base_url}/health")
-            if response.status_code == 200:
-                logger.info("✅ OMniParser connection successful")
-                return True
-            else:
-                logger.warning(f"OMniParser connection failed: {response.status_code}")
-                return False
+            logger.info(f"🚀 Loading OmniParser 2.0 model: {self.model_name}")
+            
+            # Import transformers components
+            from transformers import (
+                AutoProcessor, 
+                AutoTokenizer, 
+                AutoModelForVisionTextGeneration,
+                AutoImageProcessor
+            )
+            
+            # Load processor (handles both text and image)
+            self.processor = AutoProcessor.from_pretrained(
+                self.model_name, 
+                trust_remote_code=True
+            )
+            
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name, 
+                trust_remote_code=True
+            )
+            
+            # Load model
+            self.model = AutoModelForVisionTextGeneration.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
+                device_map=self.device,
+                trust_remote_code=True
+            )
+            
+            logger.info(f"✅ OmniParser 2.0 model loaded successfully on {self.device}")
+            return True
+            
         except Exception as e:
-            logger.warning(f"OMniParser connection test failed: {e}")
+            logger.error(f"❌ Failed to load OmniParser 2.0 model: {e}")
             return False
     
     def is_available(self) -> bool:
-        """Check if OMniParser is available."""
-        return self._available and self.api_key is not None
+        """Check if OmniParser 2.0 is available."""
+        return self._available and self.model is not None
     
     def analyze_screenshot(self, image_path: str) -> List[UIElement]:
-        """Analyze screenshot using OMniParser.
+        """Analyze screenshot using OmniParser 2.0.
         
         Args:
             image_path: Path to screenshot image
@@ -75,53 +91,86 @@ class OMniParserIntegration:
             List of detected UI elements
         """
         if not self.is_available():
-            logger.warning("OMniParser not available, skipping analysis")
+            logger.warning("OmniParser 2.0 not available, skipping analysis")
             return []
         
         try:
-            # Load and encode image
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
+            # Load image
+            image = Image.open(image_path).convert('RGB')
+            logger.info(f"📸 Loaded image: {image.size}")
             
-            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            # Create analysis prompt
+            prompt = """Analyze this Android app screenshot and extract UI elements. 
+            For each element, provide:
+            - Type (button, text, input, icon)
+            - Text content
+            - Bounding box coordinates (x, y, width, height)
+            - Confidence score
+            - Whether it's clickable
             
-            # Prepare request payload
-            payload = {
-                "image": image_b64,
-                "options": {
-                    "extract_text": True,
-                    "detect_buttons": True,
-                    "detect_input_fields": True,
-                    "detect_icons": True,
-                    "layout_analysis": True,
-                    "confidence_threshold": 0.5
-                }
-            }
+            Format the response as JSON with this structure:
+            {
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": "Login",
+                        "x": 100,
+                        "y": 200,
+                        "width": 80,
+                        "height": 40,
+                        "confidence": 0.95,
+                        "clickable": true
+                    }
+                ]
+            }"""
             
-            # Send request to OMniParser
-            logger.info("🔍 Analyzing screenshot with OMniParser...")
-            response = self.session.post(
-                f"{self.base_url}/analyze",
-                json=payload,
-                timeout=30
-            )
+            # Process inputs
+            inputs = self.processor(
+                text=prompt,
+                images=image,
+                return_tensors="pt"
+            ).to(self.device)
             
-            if response.status_code == 200:
-                result = response.json()
-                return self._parse_omniparser_result(result)
-            else:
-                logger.error(f"OMniParser analysis failed: {response.status_code} - {response.text}")
-                return []
-                
+            # Generate analysis
+            logger.info("🔍 Running OmniParser 2.0 analysis...")
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=1024,
+                    do_sample=False,
+                    temperature=0.1,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            
+            # Decode response
+            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract JSON from response
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            
+            if json_start != -1 and json_end > json_start:
+                json_str = response_text[json_start:json_end]
+                try:
+                    result = json.loads(json_str)
+                    return self._parse_omniparser_result(result, image.size)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON response: {e}")
+                    logger.debug(f"Response text: {response_text}")
+            
+            # Fallback: try to extract elements from text response
+            return self._parse_text_response(response_text, image.size)
+            
         except Exception as e:
-            logger.error(f"OMniParser analysis error: {e}")
+            logger.error(f"OmniParser 2.0 analysis error: {e}")
             return []
     
-    def _parse_omniparser_result(self, result: Dict[str, Any]) -> List[UIElement]:
-        """Parse OMniParser analysis result into UIElement objects.
+    def _parse_omniparser_result(self, result: Dict[str, Any], image_size: tuple) -> List[UIElement]:
+        """Parse OmniParser 2.0 analysis result into UIElement objects.
         
         Args:
-            result: OMniParser analysis result
+            result: OmniParser 2.0 analysis result
+            image_size: Original image size (width, height)
             
         Returns:
             List of UIElement objects
@@ -129,85 +178,88 @@ class OMniParserIntegration:
         elements = []
         
         try:
-            # Extract text elements
-            if 'text_elements' in result:
-                for text_elem in result['text_elements']:
+            if 'elements' in result:
+                for elem in result['elements']:
+                    # Create bounding box
+                    x = elem.get('x', 0)
+                    y = elem.get('y', 0)
+                    width = elem.get('width', 0)
+                    height = elem.get('height', 0)
+                    
                     bbox = BoundingBox(
-                        x1=text_elem.get('x', 0),
-                        y1=text_elem.get('y', 0),
-                        x2=text_elem.get('x', 0) + text_elem.get('width', 0),
-                        y2=text_elem.get('y', 0) + text_elem.get('height', 0)
+                        x1=x,
+                        y1=y,
+                        x2=x + width,
+                        y2=y + height
                     )
                     
+                    # Create UI element
                     element = UIElement(
                         bbox=bbox,
-                        text=text_elem.get('text', ''),
-                        confidence=text_elem.get('confidence', 0.0),
-                        element_type='text'
-                    )
-                    elements.append(element)
-            
-            # Extract button elements
-            if 'buttons' in result:
-                for button in result['buttons']:
-                    bbox = BoundingBox(
-                        x1=button.get('x', 0),
-                        y1=button.get('y', 0),
-                        x2=button.get('x', 0) + button.get('width', 0),
-                        y2=button.get('y', 0) + button.get('height', 0)
+                        text=elem.get('text', ''),
+                        confidence=elem.get('confidence', 0.5),
+                        element_type=elem.get('type', 'unknown'),
+                        clickable=elem.get('clickable', False)
                     )
                     
-                    element = UIElement(
-                        bbox=bbox,
-                        text=button.get('text', ''),
-                        confidence=button.get('confidence', 0.0),
-                        element_type='button',
-                        clickable=True
-                    )
-                    elements.append(element)
-            
-            # Extract input fields
-            if 'input_fields' in result:
-                for input_field in result['input_fields']:
-                    bbox = BoundingBox(
-                        x1=input_field.get('x', 0),
-                        y1=input_field.get('y', 0),
-                        x2=input_field.get('x', 0) + input_field.get('width', 0),
-                        y2=input_field.get('y', 0) + input_field.get('height', 0)
-                    )
+                    # Add input type if available
+                    if elem.get('type') == 'input':
+                        element.input_type = elem.get('input_type', 'text')
                     
-                    element = UIElement(
-                        bbox=bbox,
-                        text=input_field.get('placeholder', ''),
-                        confidence=input_field.get('confidence', 0.0),
-                        element_type='input',
-                        input_type=input_field.get('input_type', 'text')
-                    )
                     elements.append(element)
             
-            # Extract icons
-            if 'icons' in result:
-                for icon in result['icons']:
-                    bbox = BoundingBox(
-                        x1=icon.get('x', 0),
-                        y1=icon.get('y', 0),
-                        x2=icon.get('x', 0) + icon.get('width', 0),
-                        y2=icon.get('y', 0) + icon.get('height', 0)
-                    )
-                    
-                    element = UIElement(
-                        bbox=bbox,
-                        text=icon.get('description', ''),
-                        confidence=icon.get('confidence', 0.0),
-                        element_type='icon',
-                        clickable=icon.get('clickable', False)
-                    )
-                    elements.append(element)
-            
-            logger.info(f"✅ OMniParser detected {len(elements)} UI elements")
+            logger.info(f"✅ OmniParser 2.0 detected {len(elements)} UI elements")
             
         except Exception as e:
-            logger.error(f"Error parsing OMniParser result: {e}")
+            logger.error(f"Error parsing OmniParser 2.0 result: {e}")
+        
+        return elements
+    
+    def _parse_text_response(self, response_text: str, image_size: tuple) -> List[UIElement]:
+        """Parse text response when JSON parsing fails.
+        
+        Args:
+            response_text: Raw text response from model
+            image_size: Original image size (width, height)
+            
+        Returns:
+            List of UIElement objects
+        """
+        elements = []
+        
+        try:
+            # Simple text-based parsing as fallback
+            lines = response_text.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Try to extract element information from text
+                if any(keyword in line.lower() for keyword in ['button', 'text', 'input', 'icon']):
+                    # Create a basic element
+                    bbox = BoundingBox(
+                        x1=0,
+                        y1=0,
+                        x2=image_size[0] // 4,  # Default size
+                        y2=image_size[1] // 8
+                    )
+                    
+                    element = UIElement(
+                        bbox=bbox,
+                        text=line[:50],  # First 50 chars as text
+                        confidence=0.5,
+                        element_type='text',
+                        clickable='button' in line.lower()
+                    )
+                    
+                    elements.append(element)
+            
+            logger.info(f"✅ Text parsing detected {len(elements)} elements")
+            
+        except Exception as e:
+            logger.error(f"Error parsing text response: {e}")
         
         return elements
     
@@ -224,39 +276,58 @@ class OMniParserIntegration:
             return {}
         
         try:
-            # Load and encode image
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
+            # Load image
+            image = Image.open(image_path).convert('RGB')
             
-            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            # Create layout analysis prompt
+            prompt = """Analyze the layout structure of this Android app screenshot.
+            Identify:
+            - Main sections/regions
+            - Navigation elements
+            - Content areas
+            - Button placement patterns
             
-            # Request layout analysis
-            payload = {
-                "image": image_b64,
-                "options": {
-                    "layout_analysis": True,
-                    "extract_text": False,
-                    "detect_buttons": False,
-                    "detect_input_fields": False,
-                    "detect_icons": False
+            Return as JSON:
+            {
+                "layout": {
+                    "sections": [],
+                    "navigation": {},
+                    "content_areas": []
                 }
-            }
+            }"""
             
-            response = self.session.post(
-                f"{self.base_url}/analyze",
-                json=payload,
-                timeout=30
-            )
+            # Process and generate
+            inputs = self.processor(
+                text=prompt,
+                images=image,
+                return_tensors="pt"
+            ).to(self.device)
             
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('layout_info', {})
-            else:
-                logger.error(f"OMniParser layout analysis failed: {response.status_code}")
-                return {}
-                
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=512,
+                    do_sample=False,
+                    temperature=0.1
+                )
+            
+            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract JSON
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            
+            if json_start != -1 and json_end > json_start:
+                try:
+                    result = json.loads(response_text[json_start:json_end])
+                    return result.get('layout', {})
+                except json.JSONDecodeError:
+                    pass
+            
+            return {}
+            
         except Exception as e:
-            logger.error(f"OMniParser layout analysis error: {e}")
+            logger.error(f"OmniParser 2.0 layout analysis error: {e}")
             return {}
     
     def get_element_hierarchy(self, image_path: str) -> Dict[str, Any]:
@@ -272,50 +343,66 @@ class OMniParserIntegration:
             return {}
         
         try:
-            # Load and encode image
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
+            # Load image
+            image = Image.open(image_path).convert('RGB')
             
-            image_b64 = base64.b64encode(image_data).decode('utf-8')
+            # Create hierarchy analysis prompt
+            prompt = """Analyze the UI element hierarchy in this Android app screenshot.
+            Identify parent-child relationships between UI elements.
             
-            # Request hierarchy analysis
-            payload = {
-                "image": image_b64,
-                "options": {
-                    "hierarchy_analysis": True,
-                    "extract_text": True,
-                    "detect_buttons": True,
-                    "detect_input_fields": True,
-                    "detect_icons": True
+            Return as JSON:
+            {
+                "hierarchy": {
+                    "root_elements": [],
+                    "child_elements": {},
+                    "relationships": []
                 }
-            }
+            }"""
             
-            response = self.session.post(
-                f"{self.base_url}/analyze",
-                json=payload,
-                timeout=30
-            )
+            # Process and generate
+            inputs = self.processor(
+                text=prompt,
+                images=image,
+                return_tensors="pt"
+            ).to(self.device)
             
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('hierarchy', {})
-            else:
-                logger.error(f"OMniParser hierarchy analysis failed: {response.status_code}")
-                return {}
-                
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=512,
+                    do_sample=False,
+                    temperature=0.1
+                )
+            
+            response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            # Extract JSON
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            
+            if json_start != -1 and json_end > json_start:
+                try:
+                    result = json.loads(response_text[json_start:json_end])
+                    return result.get('hierarchy', {})
+                except json.JSONDecodeError:
+                    pass
+            
+            return {}
+            
         except Exception as e:
-            logger.error(f"OMniParser hierarchy analysis error: {e}")
+            logger.error(f"OmniParser 2.0 hierarchy analysis error: {e}")
             return {}
 
 
 # Convenience function for easy usage
-def create_omniparser_integration(api_key: str = None) -> OMniParserIntegration:
-    """Create OMniParser integration instance.
+def create_omniparser_integration(model_name: str = None, device: str = None) -> OMniParserIntegration:
+    """Create OmniParser 2.0 integration instance.
     
     Args:
-        api_key: OMniParser API key (optional, can use environment variable)
+        model_name: Hugging Face model name (optional)
+        device: Device to run on (optional)
         
     Returns:
         OMniParserIntegration instance
     """
-    return OMniParserIntegration(api_key=api_key)
+    return OMniParserIntegration(model_name=model_name, device=device)

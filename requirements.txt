@@ -39,8 +39,11 @@ opencv-python==4.8.1.78
 pytesseract==0.3.10
 scikit-image==0.21.0
 
-# OMniParser Integration (Enhanced UI Detection)
-requests>=2.31.0
+# OmniParser 2.0 Integration (Enhanced UI Detection)
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.36.0
+accelerate>=0.24.0
 Pillow>=10.0.1
 
 # Resource Monitoring & Performance

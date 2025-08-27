@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Setup OMniParser Integration
-============================
+Setup OmniParser 2.0 Integration
+================================
 
-This script helps set up OMniParser integration for enhanced UI element detection.
+This script helps set up OmniParser 2.0 integration for enhanced UI element detection.
 """
 
 import os
@@ -11,43 +11,37 @@ import sys
 from pathlib import Path
 
 def setup_omniparser():
-    """Set up OMniParser integration."""
-    print("🚀 Setting up OMniParser Integration")
+    """Set up OmniParser 2.0 integration."""
+    print("🚀 Setting up OmniParser 2.0 Integration")
     print("=" * 50)
     
-    # Check if API key is already set
-    api_key = os.getenv('OMNIPARSER_API_KEY')
-    if api_key:
-        print(f"✅ OMniParser API key found: {api_key[:8]}...")
-    else:
-        print("❌ OMniParser API key not found")
-        print("\n📋 To get an OMniParser API key:")
-        print("1. Visit https://omniparser.ai")
-        print("2. Sign up for an account")
-        print("3. Get your API key from the dashboard")
-        print("4. Set the environment variable:")
-        print("   export OMNIPARSER_API_KEY='your_api_key_here'")
-        
-        # Ask user to input API key
-        user_key = input("\n🔑 Enter your OMniParser API key (or press Enter to skip): ").strip()
-        if user_key:
-            # Add to .env file
-            env_file = Path(".env")
-            if env_file.exists():
-                with open(env_file, "a") as f:
-                    f.write(f"\n# OMniParser Configuration\nOMNIPARSER_API_KEY={user_key}\n")
-            else:
-                with open(env_file, "w") as f:
-                    f.write(f"# OMniParser Configuration\nOMNIPARSER_API_KEY={user_key}\n")
-            
-            print("✅ API key saved to .env file")
-            api_key = user_key
-        else:
-            print("⚠️  Skipping OMniParser setup")
-            return False
+    # Check system requirements
+    print("🔍 Checking system requirements...")
     
-    # Test OMniParser integration
-    print("\n🧪 Testing OMniParser integration...")
+    # Check PyTorch
+    try:
+        import torch
+        print(f"✅ PyTorch {torch.__version__} available")
+        if torch.cuda.is_available():
+            print(f"✅ CUDA available: {torch.cuda.get_device_name(0)}")
+        else:
+            print("⚠️  CUDA not available, will use CPU")
+    except ImportError:
+        print("❌ PyTorch not installed")
+        print("   Install with: pip install torch torchvision")
+        return False
+    
+    # Check Transformers
+    try:
+        import transformers
+        print(f"✅ Transformers {transformers.__version__} available")
+    except ImportError:
+        print("❌ Transformers not installed")
+        print("   Install with: pip install transformers")
+        return False
+    
+    # Test OmniParser 2.0 integration
+    print("\n🧪 Testing OmniParser 2.0 integration...")
     try:
         # Add src to path
         sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -55,24 +49,24 @@ def setup_omniparser():
         from src.vision.omniparser_integration import create_omniparser_integration
         
         # Create integration instance
-        omniparser = create_omniparser_integration(api_key)
+        omniparser = create_omniparser_integration()
         
         if omniparser.is_available():
-            print("✅ OMniParser integration successful!")
+            print("✅ OmniParser 2.0 integration successful!")
             print("✅ Ready to use enhanced UI element detection")
             return True
         else:
-            print("❌ OMniParser integration failed")
-            print("   Check your API key and internet connection")
+            print("❌ OmniParser 2.0 integration failed")
+            print("   Check your internet connection and model download")
             return False
             
     except Exception as e:
-        print(f"❌ OMniParser test failed: {e}")
+        print(f"❌ OmniParser 2.0 test failed: {e}")
         return False
 
 def test_omniparser_with_screenshot():
-    """Test OMniParser with a sample screenshot."""
-    print("\n📸 Testing OMniParser with screenshot...")
+    """Test OmniParser 2.0 with a sample screenshot."""
+    print("\n📸 Testing OmniParser 2.0 with screenshot...")
     
     try:
         from src.vision.omniparser_integration import create_omniparser_integration
@@ -80,7 +74,7 @@ def test_omniparser_with_screenshot():
         omniparser = create_omniparser_integration()
         
         if not omniparser.is_available():
-            print("❌ OMniParser not available for testing")
+            print("❌ OmniParser 2.0 not available for testing")
             return False
         
         # Look for a test screenshot
@@ -101,7 +95,7 @@ def test_omniparser_with_screenshot():
             
             # Test analysis
             elements = omniparser.analyze_screenshot(screenshot_path)
-            print(f"✅ OMniParser detected {len(elements)} UI elements")
+            print(f"✅ OmniParser 2.0 detected {len(elements)} UI elements")
             
             # Show some examples
             for i, element in enumerate(elements[:5]):
@@ -113,15 +107,15 @@ def test_omniparser_with_screenshot():
             return False
             
     except Exception as e:
-        print(f"❌ OMniParser screenshot test failed: {e}")
+        print(f"❌ OmniParser 2.0 screenshot test failed: {e}")
         return False
 
 def main():
     """Main function."""
-    print("🔧 OMniParser Setup and Test")
+    print("🔧 OmniParser 2.0 Setup and Test")
     print("=" * 40)
     
-    # Setup OMniParser
+    # Setup OmniParser 2.0
     setup_success = setup_omniparser()
     
     if setup_success:
@@ -134,15 +128,15 @@ def main():
         print(f"Test: {'✅ PASS' if test_success else '❌ FAIL'}")
         
         if setup_success and test_success:
-            print("\n🎉 OMniParser integration is ready!")
+            print("\n🎉 OmniParser 2.0 integration is ready!")
             print("✅ Enhanced UI element detection will be used")
             print("✅ Better text extraction and button detection")
             print("✅ Improved automation accuracy")
         else:
-            print("\n⚠️  OMniParser setup incomplete")
+            print("\n⚠️  OmniParser 2.0 setup incomplete")
             print("   The system will fall back to OCR")
     else:
-        print("\n⚠️  OMniParser setup skipped")
+        print("\n⚠️  OmniParser 2.0 setup skipped")
         print("   The system will use OCR for text detection")
 
 if __name__ == "__main__":
