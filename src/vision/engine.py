@@ -16,23 +16,44 @@ from .models import BoundingBox, UIElement
 class VisionEngine:
     """Analyze screenshots and return detected UI elements using OCR."""
 
-    def __init__(self, tesseract_lang: str = "eng") -> None:
+    def __init__(self, tesseract_lang: str = "eng", use_microsoft_omniparser: bool = True) -> None:
         """Initialize VisionEngine.
 
         Parameters
         ----------
         tesseract_lang : str
             Tesseract language code (default is ``"eng"``).
+        use_microsoft_omniparser : bool
+            Whether to use Microsoft OmniParser-v2.0 for UI element detection.
 
         """
-        # If the user provided a custom tesseract cmd path, set it.
-        tesseract_cmd = os.getenv("TESSERACT_CMD")
-        if tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
         self.lang = tesseract_lang
         # Use a thread pool for OCR to avoid blocking event loop.
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
+        # Try to initialize Microsoft OmniParser-v2.0 first
+        self._microsoft_omniparser_available: bool = False
+        if use_microsoft_omniparser:
+            try:
+                from .microsoft_omniparser import create_microsoft_omniparser_engine
+                self.microsoft_omniparser_engine = create_microsoft_omniparser_engine()
+                logger.info("VisionEngine: Microsoft OmniParser-v2.0 initialized successfully")
+                self._microsoft_omniparser_available = True
+                return  # Skip OCR setup if Microsoft OmniParser is available
+            except Exception as e:
+                logger.warning(f"VisionEngine: Microsoft OmniParser-v2.0 initialization failed: {e}")
+                self._microsoft_omniparser_available = False
+
+        # Fallback to OCR setup
+        self._setup_ocr()
+    
+    def _setup_ocr(self):
+        """Setup OCR fallback when Microsoft OmniParser is not available."""
+        # If the user provided a custom tesseract cmd path, set it.
+        tesseract_cmd = os.getenv("TESSERACT_CMD")
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        
         # Check if OCR should be enabled and Tesseract is present
         self._ocr_available: bool = False
         if not config.use_ocr:
@@ -79,28 +100,28 @@ class VisionEngine:
             logger.error(f"Screenshot not found: {image_path}")
             return []
 
-        # Try OmniParser first if available
-        if hasattr(self, '_omniparser_available') and self._omniparser_available:
+        # Try Microsoft OmniParser-v2.0 first if available
+        if hasattr(self, '_microsoft_omniparser_available') and self._microsoft_omniparser_available:
             try:
-                logger.info("Using OmniParser for advanced UI element detection")
-                elements = self.omniparser_engine.analyze_screenshot(image_path)
+                logger.info("Using Microsoft OmniParser-v2.0 for advanced UI element detection")
+                elements = self.microsoft_omniparser_engine.analyze_screenshot(image_path)
                 
                 if elements:
                     # Get summary for logging
-                    summary = self.omniparser_engine.get_element_summary(elements)
-                    logger.info(f"OmniParser detected {summary['total_elements']} elements: "
-                              f"{summary['text_elements']} text, {summary['clickable_elements']} clickable, "
-                              f"{summary['button_elements']} buttons, {summary['input_elements']} inputs")
+                    summary = self.microsoft_omniparser_engine.get_element_summary(elements)
+                    logger.info(f"Microsoft OmniParser-v2.0 detected {summary['total_elements']} elements: "
+                              f"{summary['clickable_elements']} clickable, {summary['button_elements']} buttons, "
+                              f"{summary['input_elements']} inputs")
                     
                     # Filter for interactive elements only
                     interactive_elements = self._filter_interactive_elements(elements)
-                    logger.debug(f"OmniParser total interactive elements: {len(interactive_elements)}")
+                    logger.debug(f"Microsoft OmniParser-v2.0 total interactive elements: {len(interactive_elements)}")
                     return interactive_elements
                 else:
-                    logger.warning("OmniParser returned no elements, falling back to OCR")
+                    logger.warning("Microsoft OmniParser-v2.0 returned no elements, falling back to OCR")
                     
             except Exception as e:
-                logger.warning(f"OmniParser analysis failed: {e}, falling back to OCR")
+                logger.warning(f"Microsoft OmniParser-v2.0 analysis failed: {e}, falling back to OCR")
         
         # Fallback to OCR
         if not self._ocr_available:
