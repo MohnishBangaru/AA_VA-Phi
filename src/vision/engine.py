@@ -16,44 +16,37 @@ from .models import BoundingBox, UIElement
 class VisionEngine:
     """Analyze screenshots and return detected UI elements using OCR."""
 
-    def __init__(self, tesseract_lang: str = "eng", use_microsoft_omniparser: bool = True) -> None:
-        """Initialize VisionEngine.
+    def __init__(self, tesseract_lang: str = "eng") -> None:
+        """Initialize VisionEngine with OCR and OMniParser capabilities.
 
         Parameters
         ----------
         tesseract_lang : str
             Tesseract language code (default is ``"eng"``).
-        use_microsoft_omniparser : bool
-            Whether to use Microsoft OmniParser-v2.0 for UI element detection.
 
         """
-        self.lang = tesseract_lang
-        # Use a thread pool for OCR to avoid blocking event loop.
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
-        # Try to initialize Microsoft OmniParser-v2.0 first
-        self._microsoft_omniparser_available: bool = False
-        if use_microsoft_omniparser:
-            try:
-                from .microsoft_omniparser import create_microsoft_omniparser_engine
-                self.microsoft_omniparser_engine = create_microsoft_omniparser_engine()
-                logger.info("VisionEngine: Microsoft OmniParser-v2.0 initialized successfully")
-                self._microsoft_omniparser_available = True
-                return  # Skip OCR setup if Microsoft OmniParser is available
-            except Exception as e:
-                logger.warning(f"VisionEngine: Microsoft OmniParser-v2.0 initialization failed: {e}")
-                self._microsoft_omniparser_available = False
-
-        # Fallback to OCR setup
-        self._setup_ocr()
-    
-    def _setup_ocr(self):
-        """Setup OCR fallback when Microsoft OmniParser is not available."""
         # If the user provided a custom tesseract cmd path, set it.
         tesseract_cmd = os.getenv("TESSERACT_CMD")
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-        
+        self.lang = tesseract_lang
+        # Use a thread pool for OCR to avoid blocking event loop.
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
+        # Initialize OMniParser integration
+        self._omniparser_available: bool = False
+        try:
+            from .omniparser_integration import create_omniparser_integration
+            self.omniparser = create_omniparser_integration()
+            self._omniparser_available = self.omniparser.is_available()
+            if self._omniparser_available:
+                logger.info("✅ VisionEngine: OMniParser integration available")
+            else:
+                logger.info("ℹ️  VisionEngine: OMniParser not available (no API key or connection failed)")
+        except Exception as e:
+            logger.warning(f"VisionEngine: OMniParser integration failed: {e}")
+            self.omniparser = None
+
         # Check if OCR should be enabled and Tesseract is present
         self._ocr_available: bool = False
         if not config.use_ocr:
@@ -96,42 +89,38 @@ class VisionEngine:
     # ------------------------------------------------------------------
     def analyze(self, image_path: str) -> list[UIElement]:
         """Return list of detected `UIElement` objects from the screenshot."""
+        elements: list[UIElement] = []
+
         if not os.path.exists(image_path):
             logger.error(f"Screenshot not found: {image_path}")
             return []
 
-        # Try Microsoft OmniParser-v2.0 first if available
-        if hasattr(self, '_microsoft_omniparser_available') and self._microsoft_omniparser_available:
+        # Try OMniParser first (if available)
+        if self._omniparser_available and self.omniparser:
             try:
-                logger.info("Using Microsoft OmniParser-v2.0 for advanced UI element detection")
-                elements = self.microsoft_omniparser_engine.analyze_screenshot(image_path)
+                logger.info("🔍 Using OMniParser for UI element detection...")
+                omniparser_elements = self.omniparser.analyze_screenshot(image_path)
+                elements.extend(omniparser_elements)
+                logger.info(f"✅ OMniParser detected {len(omniparser_elements)} elements")
                 
-                if elements:
-                    # Get summary for logging
-                    summary = self.microsoft_omniparser_engine.get_element_summary(elements)
-                    logger.info(f"Microsoft OmniParser-v2.0 detected {summary['total_elements']} elements: "
-                              f"{summary['clickable_elements']} clickable, {summary['button_elements']} buttons, "
-                              f"{summary['input_elements']} inputs")
-                    
-                    # Filter for interactive elements only
+                # If OMniParser found elements, filter and return them
+                if omniparser_elements:
                     interactive_elements = self._filter_interactive_elements(elements)
-                    logger.debug(f"Microsoft OmniParser-v2.0 total interactive elements: {len(interactive_elements)}")
+                    logger.debug(f"VisionEngine total interactive elements: {len(interactive_elements)}")
                     return interactive_elements
-                else:
-                    logger.warning("Microsoft OmniParser-v2.0 returned no elements, falling back to OCR")
                     
             except Exception as e:
-                logger.warning(f"Microsoft OmniParser-v2.0 analysis failed: {e}, falling back to OCR")
-        
-        # Fallback to OCR
+                logger.warning(f"OMniParser analysis failed: {e}, falling back to OCR")
+
+        # Fallback to OCR if OMniParser is not available or failed
         if not self._ocr_available:
-            logger.warning("OCR not available, no elements detected")
-            return []
+            logger.warning("No OCR or OMniParser available, returning empty list")
+            return elements
 
         image = cv2.imread(image_path)
         if image is None:
             logger.error(f"Failed to load image: {image_path}")
-            return []
+            return elements
 
         # Pre-process: convert to grayscale, optional resize for speed
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -148,7 +137,6 @@ class VisionEngine:
         )
         ocr_data = future.result()
 
-        elements: list[UIElement] = []
         n_boxes = len(ocr_data["level"])
         for i in range(n_boxes):
             text = ocr_data["text"][i].strip()
@@ -164,7 +152,7 @@ class VisionEngine:
             bbox = BoundingBox(x, y, x + w, y + h)
             elements.append(UIElement(bbox=bbox, text=text, confidence=conf / 100.0))
 
-        logger.debug(f"VisionEngine detected {len(elements)} text elements")
+        logger.debug(f"VisionEngine detected {len(elements)} text elements via OCR")
 
         # Template matching (non-text elements)
         try:

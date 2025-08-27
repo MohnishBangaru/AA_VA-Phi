@@ -39,6 +39,10 @@ opencv-python==4.8.1.78
 pytesseract==0.3.10
 scikit-image==0.21.0
 
+# OMniParser Integration (Enhanced UI Detection)
+requests>=2.31.0
+Pillow>=10.0.1
+
 # Resource Monitoring & Performance
 psutil==5.9.5
 memory-profiler==0.60.0
