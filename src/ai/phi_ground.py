@@ -461,12 +461,22 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             # Generate response with robust caching fixes
             with torch.no_grad():
                 generation_success = False
-                
-                # Strategy 1: Try with simple generation (most reliable)
+
+                # Debug: log inputs present, shapes and device
                 try:
-                    logger.info("Trying simple generation strategy")
+                    keys = list(inputs.keys())
+                    shapes = {k: tuple(v.shape) for k, v in inputs.items() if hasattr(v, 'shape')}
+                    devices = {k: str(v.device) for k, v in inputs.items() if hasattr(v, 'device')}
+                    logger.info(f"Generation inputs keys: {keys}")
+                    logger.info(f"Generation input shapes: {shapes}")
+                    logger.info(f"Generation input devices: {devices}, model device: {self.device}")
+                except Exception as _log_err:
+                    logger.debug(f"Failed to log input shapes/devices: {_log_err}")
+                
+                # Strategy 1: Prefer full vision generation first when pixel_values are present
+                try:
                     if 'pixel_values' in inputs:
-                        # Vision model requires vision tensors passed through
+                        logger.info("Trying vision generation (preferred)")
                         outputs = self.model.generate(
                             **inputs,
                             max_new_tokens=256,
@@ -476,6 +486,7 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                             return_dict_in_generate=False
                         )
                     else:
+                        logger.info("Trying simple text generation")
                         outputs = self.model.generate(
                             input_ids=inputs.get('input_ids'),
                             attention_mask=inputs.get('attention_mask'),
@@ -486,9 +497,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                             return_dict_in_generate=False
                         )
                     generation_success = True
-                    logger.info("Simple generation successful")
+                    logger.info("Generation successful")
                 except Exception as e:
-                    logger.warning(f"Simple generation failed: {e}")
+                    logger.warning(f"Preferred generation failed: {e}")
                 
                 # Strategy 2: Try with basic parameters
                 if not generation_success:
