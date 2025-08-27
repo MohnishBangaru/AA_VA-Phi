@@ -158,7 +158,7 @@ class PhiGroundActionGenerator:
                     
                     # Move to CPU if using CPU fallback strategy
                     if strategy['name'] == "CPU Fallback":
-                        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                        self.device = "cpu"
                         self.model = self.model.to("cpu")
                         logger.info("Model moved to CPU for CPU Fallback strategy")
                     

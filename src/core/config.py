@@ -52,8 +52,7 @@ class Config(BaseSettings):
     use_ocr: bool = Field(default=True)  # Toggle Tesseract OCR usage
 
     # OCR Engine
-    # Path to the Tesseract OCR binary (leave None to use system PATH)
-    tesseract_cmd: Optional[str] = Field(default=None, description="Path to Tesseract executable")
+    # Path to the Tesseract OCR binary (leave None to use system PAT    tesseract_cmd: Optional[str] = Field(default=None, description="Path to Tesseract executable")
 
     # Framework Configuration
     log_level: str = Field(default="INFO")
