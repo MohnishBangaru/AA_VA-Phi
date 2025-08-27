@@ -57,14 +57,14 @@ class OMniParserIntegration:
             self.processor = AutoProcessor.from_pretrained(
                 self.model_name, 
                 trust_remote_code=True,
-                use_auth_token=True
+                token=True
             )
             
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, 
                 trust_remote_code=True,
-                use_auth_token=True
+                token=True
             )
             
             # Load model
@@ -73,7 +73,7 @@ class OMniParserIntegration:
                 torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
                 device_map=self.device,
                 trust_remote_code=True,
-                use_auth_token=True
+                token=True
             )
             
             logger.info(f"✅ OmniParser 2.0 model loaded successfully on {self.device}")

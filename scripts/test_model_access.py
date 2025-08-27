@@ -39,7 +39,7 @@ def test_model_access():
         print("❌ No token found in environment")
         return False
     
-    # Test different model names
+    # Test different model names (including simpler alternatives)
     models_to_test = [
         "microsoft/OmniParser",
         "microsoft/OmniParser-v2.0"
@@ -54,7 +54,7 @@ def test_model_access():
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 trust_remote_code=True,
-                use_auth_token=True
+                token=True
             )
             print(f"✅ Tokenizer loaded successfully for {model_name}")
             
@@ -63,7 +63,7 @@ def test_model_access():
             processor = AutoProcessor.from_pretrained(
                 model_name,
                 trust_remote_code=True,
-                use_auth_token=True
+                token=True
             )
             print(f"✅ Processor loaded successfully for {model_name}")
             
