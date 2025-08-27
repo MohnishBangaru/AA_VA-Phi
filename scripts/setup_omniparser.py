@@ -40,6 +40,28 @@ def setup_omniparser():
         print("   Install with: pip install transformers")
         return False
     
+    # Check Hugging Face Hub
+    try:
+        import huggingface_hub
+        print(f"✅ Hugging Face Hub {huggingface_hub.__version__} available")
+    except ImportError:
+        print("❌ Hugging Face Hub not installed")
+        print("   Install with: pip install huggingface-hub")
+        return False
+    
+    # Check Hugging Face login
+    print("\n🔑 Checking Hugging Face Hub login...")
+    try:
+        from huggingface_hub import HfApi
+        
+        api = HfApi()
+        user = api.whoami()
+        print(f"✅ Logged in to Hugging Face Hub as: {user}")
+    except Exception as e:
+        print(f"❌ Not logged in to Hugging Face Hub: {e}")
+        print("   Please run: python scripts/setup_huggingface_login.py")
+        return False
+    
     # Test OmniParser 2.0 integration
     print("\n🧪 Testing OmniParser 2.0 integration...")
     try:
@@ -57,7 +79,7 @@ def setup_omniparser():
             return True
         else:
             print("❌ OmniParser 2.0 integration failed")
-            print("   Check your internet connection and model download")
+            print("   Check your Hugging Face login and model permissions")
             return False
             
     except Exception as e:

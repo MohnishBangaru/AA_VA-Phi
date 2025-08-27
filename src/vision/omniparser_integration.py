@@ -42,6 +42,9 @@ class OMniParserIntegration:
         try:
             logger.info(f"🚀 Loading OmniParser 2.0 model: {self.model_name}")
             
+            # Check Hugging Face Hub login
+            self._check_hf_login()
+            
             # Import transformers components
             from transformers import (
                 AutoProcessor, 
@@ -53,13 +56,15 @@ class OMniParserIntegration:
             # Load processor (handles both text and image)
             self.processor = AutoProcessor.from_pretrained(
                 self.model_name, 
-                trust_remote_code=True
+                trust_remote_code=True,
+                use_auth_token=True
             )
             
             # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, 
-                trust_remote_code=True
+                trust_remote_code=True,
+                use_auth_token=True
             )
             
             # Load model
@@ -67,7 +72,8 @@ class OMniParserIntegration:
                 self.model_name,
                 torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
                 device_map=self.device,
-                trust_remote_code=True
+                trust_remote_code=True,
+                use_auth_token=True
             )
             
             logger.info(f"✅ OmniParser 2.0 model loaded successfully on {self.device}")
@@ -75,6 +81,21 @@ class OMniParserIntegration:
             
         except Exception as e:
             logger.error(f"❌ Failed to load OmniParser 2.0 model: {e}")
+            return False
+    
+    def _check_hf_login(self) -> bool:
+        """Check if user is logged in to Hugging Face Hub."""
+        try:
+            from huggingface_hub import HfApi
+            
+            api = HfApi()
+            user = api.whoami()
+            logger.info(f"✅ Logged in to Hugging Face Hub as: {user}")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️  Not logged in to Hugging Face Hub: {e}")
+            logger.info("🔑 Please login with: huggingface-cli login")
             return False
     
     def is_available(self) -> bool:
