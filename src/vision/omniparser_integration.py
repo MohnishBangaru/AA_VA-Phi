@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class OMniParserIntegration:
     """Integration with OmniParser 2.0 via Hugging Face for advanced UI analysis."""
     
-    def __init__(self, model_name: str = "microsoft/OmniParser-v2.0", device: str = None):
+    def __init__(self, model_name: str = "microsoft/OmniParser", device: str = None):
         """Initialize OmniParser 2.0 integration.
         
         Args:
