@@ -23,6 +23,14 @@ from PIL import Image
 import numpy as np
 from loguru import logger
 
+# Import torchvision at module level to avoid circular imports
+try:
+    import torchvision.transforms as transforms
+    TORCHVISION_AVAILABLE = True
+except ImportError:
+    TORCHVISION_AVAILABLE = False
+    transforms = None
+
 from ..core.config import config
 from ..vision.models import UIElement, BoundingBox
 
@@ -39,7 +47,15 @@ class PhiGroundActionGenerator:
         self.model_name = model_name
         self.tokenizer = None
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Force CUDA if available, with better detection
+        if torch.cuda.is_available():
+            self.device = "cuda"
+            logger.info(f"CUDA detected: {torch.cuda.get_device_name(0)}")
+        else:
+            self.device = "cpu"
+            logger.warning("CUDA not available, using CPU")
+            
         self._initialized = False
         self.vision_supported = False
         
@@ -339,11 +355,13 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                 
                                 # Approach 4: Manual image processing
                                 try:
+                                    if not TORCHVISION_AVAILABLE:
+                                        raise ImportError("torchvision not available")
+                                        
                                     # Resize image to standard size
                                     image_resized = image.resize((224, 224))
                                     
-                                    # Convert to tensor
-                                    import torchvision.transforms as transforms
+                                    # Convert to tensor using imported transforms
                                     transform = transforms.Compose([
                                         transforms.ToTensor(),
                                         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -364,6 +382,16 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                     logger.info("Vision tokenization successful with manual processing")
                                 except Exception as e4:
                                     logger.debug(f"Manual processing approach failed: {e4}")
+                                    
+                                    # Fallback: Simple tensor conversion without torchvision
+                                    try:
+                                        # Convert PIL image to numpy array and then to tensor
+                                        image_array = np.array(image_resized)
+                                        image_tensor = torch.from_numpy(image_array).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+                                        vision_inputs['pixel_values'] = image_tensor.to(self.device)
+                                        logger.info("Vision tokenization successful with simple tensor conversion")
+                                    except Exception as e5:
+                                        logger.debug(f"Simple tensor conversion failed: {e5}")
                     
                     if vision_inputs is not None:
                         inputs = vision_inputs
