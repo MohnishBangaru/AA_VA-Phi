@@ -44,26 +44,76 @@ class VisionEngine:
                     "/opt/homebrew/bin/tesseract",  # macOS Homebrew
                     "/usr/local/bin/tesseract",     # macOS/Linux
                     "/usr/bin/tesseract",           # Linux
+                    "/usr/local/lib/python3.11/dist-packages/tesseract",  # Python packages
+                    "/usr/local/lib/python3.11/site-packages/tesseract",  # Python site-packages
+                    "/usr/lib/python3.11/dist-packages/tesseract",        # System Python packages
+                    "/usr/lib/python3.11/site-packages/tesseract",        # System Python site-packages
+                    "/opt/conda/bin/tesseract",     # Conda installation
+                    "/opt/conda/envs/*/bin/tesseract",  # Conda environments
                     "tesseract"                     # PATH
                 ]
                 
                 tesseract_found = False
+                
+                # Add dynamic Python package directory search
+                import sys
+                for site_packages in sys.path:
+                    if 'site-packages' in site_packages or 'dist-packages' in site_packages:
+                        tesseract_paths.append(f"{site_packages}/tesseract")
+                        tesseract_paths.append(f"{site_packages}/tesseract_ocr")
+                
+                # Add conda environment paths
+                conda_prefix = os.getenv('CONDA_PREFIX')
+                if conda_prefix:
+                    tesseract_paths.append(f"{conda_prefix}/bin/tesseract")
+                
                 for path in tesseract_paths:
                     try:
-                        pytesseract.pytesseract.tesseract_cmd = path
-                        pytesseract.get_tesseract_version()
-                        logger.info(f"VisionEngine: Tesseract found at {path}")
-                        tesseract_found = True
-                        break
+                        # Handle wildcard paths for conda environments
+                        if '*' in path:
+                            import glob
+                            expanded_paths = glob.glob(path)
+                            for expanded_path in expanded_paths:
+                                try:
+                                    pytesseract.pytesseract.tesseract_cmd = expanded_path
+                                    pytesseract.get_tesseract_version()
+                                    logger.info(f"VisionEngine: Tesseract found at {expanded_path}")
+                                    tesseract_found = True
+                                    break
+                                except Exception:
+                                    continue
+                            if tesseract_found:
+                                break
+                        else:
+                            pytesseract.pytesseract.tesseract_cmd = path
+                            pytesseract.get_tesseract_version()
+                            logger.info(f"VisionEngine: Tesseract found at {path}")
+                            tesseract_found = True
+                            break
                     except Exception:
                         continue
                 
                 if tesseract_found:
                     self._ocr_available = True
                 else:
-                    logger.warning(
-                        "VisionEngine: Tesseract not found in common locations. OCR will be skipped."
-                    )
+                    # Try to use Python tesseract package as fallback
+                    try:
+                        import tesseract
+                        logger.info("VisionEngine: Using Python tesseract package as fallback")
+                        self._ocr_available = True
+                        # Set a dummy path for pytesseract
+                        pytesseract.pytesseract.tesseract_cmd = "python_tesseract_fallback"
+                    except (ImportError, SyntaxError):
+                        try:
+                            import tesseract_ocr
+                            logger.info("VisionEngine: Using Python tesseract_ocr package as fallback")
+                            self._ocr_available = True
+                            # Set a dummy path for pytesseract
+                            pytesseract.pytesseract.tesseract_cmd = "python_tesseract_ocr_fallback"
+                        except (ImportError, SyntaxError):
+                            logger.warning(
+                                "VisionEngine: Tesseract not found in common locations. OCR will be skipped."
+                            )
                     
             except Exception as exc:
                 logger.warning(
@@ -94,13 +144,28 @@ class VisionEngine:
         _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
 
         # Run OCR asynchronously
-        future = self._executor.submit(
-            pytesseract.image_to_data,
-            thresh,
-            lang=self.lang,
-            output_type=pytesseract.Output.DICT,
-        )
-        ocr_data = future.result()
+        try:
+            future = self._executor.submit(
+                pytesseract.image_to_data,
+                thresh,
+                lang=self.lang,
+                output_type=pytesseract.Output.DICT,
+            )
+            ocr_data = future.result()
+        except Exception as e:
+            # Fallback to Python tesseract package if pytesseract fails
+            logger.warning(f"pytesseract failed: {e}, trying Python tesseract fallback")
+            try:
+                import tesseract
+                # Use Python tesseract package directly
+                ocr_data = self._run_python_tesseract_fallback(thresh)
+            except (ImportError, SyntaxError):
+                try:
+                    import tesseract_ocr
+                    ocr_data = self._run_python_tesseract_ocr_fallback(thresh)
+                except (ImportError, SyntaxError):
+                    logger.error("All OCR methods failed")
+                    return []
 
         elements: list[UIElement] = []
         n_boxes = len(ocr_data["level"])
@@ -251,4 +316,68 @@ class VisionEngine:
         bbox2_area = bbox2.width() * bbox2.height()
         union_area = bbox1_area + bbox2_area - intersection_area
         
-        return intersection_area / union_area if union_area > 0 else 0.0 
+        return intersection_area / union_area if union_area > 0 else 0.0
+    
+    def _run_python_tesseract_fallback(self, image) -> dict:
+        """Fallback method using Python tesseract package."""
+        try:
+            import tesseract
+            # Convert image to format expected by Python tesseract
+            import numpy as np
+            from PIL import Image
+            
+            # Convert OpenCV image to PIL
+            if len(image.shape) == 3:
+                image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            else:
+                image_pil = Image.fromarray(image)
+            
+            # Use Python tesseract package
+            result = tesseract.image_to_data(image_pil, output_type=tesseract.Output.DICT)
+            return result
+        except (ImportError, SyntaxError) as e:
+            logger.error(f"Python tesseract package has syntax error or import issue: {e}")
+            # Return empty result structure
+            return {
+                "level": [], "left": [], "top": [], "width": [], "height": [],
+                "text": [], "conf": []
+            }
+        except Exception as e:
+            logger.error(f"Python tesseract fallback failed: {e}")
+            # Return empty result structure
+            return {
+                "level": [], "left": [], "top": [], "width": [], "height": [],
+                "text": [], "conf": []
+            }
+    
+    def _run_python_tesseract_ocr_fallback(self, image) -> dict:
+        """Fallback method using Python tesseract_ocr package."""
+        try:
+            import tesseract_ocr
+            # Convert image to format expected by tesseract_ocr
+            import numpy as np
+            from PIL import Image
+            
+            # Convert OpenCV image to PIL
+            if len(image.shape) == 3:
+                image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            else:
+                image_pil = Image.fromarray(image)
+            
+            # Use tesseract_ocr package
+            result = tesseract_ocr.image_to_data(image_pil, output_type=tesseract_ocr.Output.DICT)
+            return result
+        except (ImportError, SyntaxError) as e:
+            logger.error(f"Python tesseract_ocr package has syntax error or import issue: {e}")
+            # Return empty result structure
+            return {
+                "level": [], "left": [], "top": [], "width": [], "height": [],
+                "text": [], "conf": []
+            }
+        except Exception as e:
+            logger.error(f"Python tesseract_ocr fallback failed: {e}")
+            # Return empty result structure
+            return {
+                "level": [], "left": [], "top": [], "width": [], "height": [],
+                "text": [], "conf": []
+            } 
