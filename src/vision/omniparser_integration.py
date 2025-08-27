@@ -14,7 +14,7 @@ from PIL import Image
 import torch
 import numpy as np
 
-from .ui_elements import UIElement, BoundingBox
+from .models import UIElement, BoundingBox
 
 logger = logging.getLogger(__name__)
 
@@ -208,10 +208,10 @@ class OMniParserIntegration:
                     height = elem.get('height', 0)
                     
                     bbox = BoundingBox(
-                        x1=x,
-                        y1=y,
-                        x2=x + width,
-                        y2=y + height
+                        left=x,
+                        top=y,
+                        right=x + width,
+                        bottom=y + height
                     )
                     
                     # Create UI element
@@ -220,12 +220,9 @@ class OMniParserIntegration:
                         text=elem.get('text', ''),
                         confidence=elem.get('confidence', 0.5),
                         element_type=elem.get('type', 'unknown'),
-                        clickable=elem.get('clickable', False)
+                        clickable=elem.get('clickable', False),
+                        input_type=elem.get('input_type', 'text') if elem.get('type') == 'input' else 'text'
                     )
-                    
-                    # Add input type if available
-                    if elem.get('type') == 'input':
-                        element.input_type = elem.get('input_type', 'text')
                     
                     elements.append(element)
             
@@ -261,10 +258,10 @@ class OMniParserIntegration:
                 if any(keyword in line.lower() for keyword in ['button', 'text', 'input', 'icon']):
                     # Create a basic element
                     bbox = BoundingBox(
-                        x1=0,
-                        y1=0,
-                        x2=image_size[0] // 4,  # Default size
-                        y2=image_size[1] // 8
+                        left=0,
+                        top=0,
+                        right=image_size[0] // 4,  # Default size
+                        bottom=image_size[1] // 8
                     )
                     
                     element = UIElement(
@@ -272,7 +269,8 @@ class OMniParserIntegration:
                         text=line[:50],  # First 50 chars as text
                         confidence=0.5,
                         element_type='text',
-                        clickable='button' in line.lower()
+                        clickable='button' in line.lower(),
+                        input_type='text'
                     )
                     
                     elements.append(element)

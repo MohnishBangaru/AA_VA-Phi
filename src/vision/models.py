@@ -34,4 +34,6 @@ class UIElement:
     bbox: BoundingBox
     text: str
     confidence: float
-    element_type: str = "text"  # could be button, label, etc. 
+    element_type: str = "text"  # could be button, label, etc.
+    clickable: bool = False
+    input_type: str = "text" 
