@@ -17,7 +17,7 @@ class VisionEngine:
     """Analyze screenshots and return detected UI elements using OCR."""
 
     def __init__(self, tesseract_lang: str = "eng") -> None:
-        """Initialize VisionEngine with OCR and OMniParser capabilities.
+        """Initialize VisionEngine.
 
         Parameters
         ----------
@@ -32,20 +32,6 @@ class VisionEngine:
         self.lang = tesseract_lang
         # Use a thread pool for OCR to avoid blocking event loop.
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
-        # Initialize OmniParser 2.0 integration
-        self._omniparser_available: bool = False
-        try:
-            from .omniparser_integration import create_omniparser_integration
-            self.omniparser = create_omniparser_integration()
-            self._omniparser_available = self.omniparser.is_available()
-            if self._omniparser_available:
-                logger.info("✅ VisionEngine: OmniParser 2.0 integration available")
-            else:
-                logger.info("ℹ️  VisionEngine: OmniParser 2.0 not available (model loading failed)")
-        except Exception as e:
-            logger.warning(f"VisionEngine: OmniParser 2.0 integration failed: {e}")
-            self.omniparser = None
 
         # Check if OCR should be enabled and Tesseract is present
         self._ocr_available: bool = False
@@ -89,38 +75,17 @@ class VisionEngine:
     # ------------------------------------------------------------------
     def analyze(self, image_path: str) -> list[UIElement]:
         """Return list of detected `UIElement` objects from the screenshot."""
-        elements: list[UIElement] = []
+        if not self._ocr_available:
+            return []  # OCR disabled, return empty list
 
         if not os.path.exists(image_path):
             logger.error(f"Screenshot not found: {image_path}")
             return []
 
-        # Try OmniParser 2.0 first (if available)
-        if self._omniparser_available and self.omniparser:
-            try:
-                logger.info("🔍 Using OmniParser 2.0 for UI element detection...")
-                omniparser_elements = self.omniparser.analyze_screenshot(image_path)
-                elements.extend(omniparser_elements)
-                logger.info(f"✅ OmniParser 2.0 detected {len(omniparser_elements)} elements")
-                
-                # If OmniParser 2.0 found elements, filter and return them
-                if omniparser_elements:
-                    interactive_elements = self._filter_interactive_elements(elements)
-                    logger.debug(f"VisionEngine total interactive elements: {len(interactive_elements)}")
-                    return interactive_elements
-                    
-            except Exception as e:
-                logger.warning(f"OmniParser 2.0 analysis failed: {e}, falling back to OCR")
-
-        # Fallback to OCR if OmniParser 2.0 is not available or failed
-        if not self._ocr_available:
-            logger.warning("No OCR or OmniParser 2.0 available, returning empty list")
-            return elements
-
         image = cv2.imread(image_path)
         if image is None:
             logger.error(f"Failed to load image: {image_path}")
-            return elements
+            return []
 
         # Pre-process: convert to grayscale, optional resize for speed
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -137,6 +102,7 @@ class VisionEngine:
         )
         ocr_data = future.result()
 
+        elements: list[UIElement] = []
         n_boxes = len(ocr_data["level"])
         for i in range(n_boxes):
             text = ocr_data["text"][i].strip()
@@ -152,7 +118,7 @@ class VisionEngine:
             bbox = BoundingBox(x, y, x + w, y + h)
             elements.append(UIElement(bbox=bbox, text=text, confidence=conf / 100.0))
 
-        logger.debug(f"VisionEngine detected {len(elements)} text elements via OCR")
+        logger.debug(f"VisionEngine detected {len(elements)} text elements")
 
         # Template matching (non-text elements)
         try:

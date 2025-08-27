@@ -287,24 +287,18 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     # Try multiple vision tokenization approaches
                     vision_inputs = None
                     
-                    # Approach 1: Try with AutoImageProcessor (most reliable for Phi-3-vision)
+                    # Approach 1: Try with AutoImageProcessor
                     try:
                         from transformers import AutoImageProcessor
                         image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
                         processed_image = image_processor(image, return_tensors="pt")
-                        
-                        # For Phi-3-vision, we need to combine text and image properly
                         vision_inputs = self.tokenizer(
                             prompt,
                             return_tensors="pt",
+                            **processed_image,
                             padding=True,
                             truncation=True
                         )
-                        
-                        # Add image data to the inputs
-                        for key, value in processed_image.items():
-                            vision_inputs[key] = value
-                        
                         # Move to correct device
                         vision_inputs = {k: v.to(self.device) for k, v in vision_inputs.items()}
                         logger.info("Vision tokenization successful with AutoImageProcessor")
@@ -318,39 +312,15 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                 vision_inputs = self.tokenizer(
                                     prompt,
                                     return_tensors="pt",
+                                    **processed_image,
                                     padding=True,
                                     truncation=True
                                 )
-                                
-                                # Add image data to the inputs
-                                for key, value in processed_image.items():
-                                    vision_inputs[key] = value
-                                
                                 # Move to correct device
                                 vision_inputs = {k: v.to(self.device) for k, v in vision_inputs.items()}
                                 logger.info("Vision tokenization successful with model's image processor")
                         except Exception as e2:
                             logger.debug(f"Model image processor approach failed: {e2}")
-                        
-                        # Approach 3: Try direct image embedding (fallback)
-                        try:
-                            if not vision_inputs:
-                                # Create text inputs first
-                                vision_inputs = self.tokenizer(
-                                    prompt,
-                                    return_tensors="pt",
-                                    padding=True,
-                                    truncation=True
-                                )
-                                
-                                # Add image as a separate field (some models support this)
-                                vision_inputs['image'] = image
-                                
-                                # Move to correct device
-                                vision_inputs = {k: v.to(self.device) if hasattr(v, 'to') else v for k, v in vision_inputs.items()}
-                                logger.info("Vision tokenization successful with direct image embedding")
-                        except Exception as e3:
-                            logger.debug(f"Direct image embedding approach failed: {e3}")
                     
                     if vision_inputs is not None:
                         inputs = vision_inputs
