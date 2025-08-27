@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
@@ -47,6 +48,8 @@ class PhiGroundActionGenerator:
         self.model_name = model_name
         self.tokenizer = None
         self.model = None
+        # Hugging Face token (optional, but required for gated models)
+        self.hf_token = os.getenv("HUGGING_FACE_HUB_TOKEN")
         
         # Force CUDA if available, with better detection
         if torch.cuda.is_available():
@@ -68,8 +71,12 @@ class PhiGroundActionGenerator:
             logger.info(f"Initializing Phi Ground model: {self.model_name}")
             logger.info(f"Using device: {self.device}")
             
-            # Load tokenizer first
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+            # Load tokenizer first (pass token if available)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                trust_remote_code=True,
+                token=self.hf_token,
+            )
             
             # Check if vision is supported
             try:
@@ -164,11 +171,13 @@ class PhiGroundActionGenerator:
                         self.model = AutoModelForCausalLM.from_pretrained(
                             self.model_name,
                             config=config,
+                            token=self.hf_token,
                             **strategy['kwargs']
                         )
                     else:
                         self.model = AutoModelForCausalLM.from_pretrained(
                             self.model_name,
+                            token=self.hf_token,
                             **strategy['kwargs']
                         )
                     
@@ -302,6 +311,34 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     
                     # Try multiple vision tokenization approaches
                     vision_inputs = None
+
+                    # Approach 0: Use AutoProcessor (preferred for Phi-3 Vision)
+                    try:
+                        from transformers import AutoProcessor
+                        processor = AutoProcessor.from_pretrained(
+                            self.model_name,
+                            trust_remote_code=True,
+                            token=self.hf_token,
+                        )
+
+                        # Build chat template with image placeholder expected by the model
+                        messages = [
+                            {"role": "user", "content": "<|image_1|>\n" + task_description}
+                        ]
+                        formatted_prompt = processor.tokenizer.apply_chat_template(
+                            messages, tokenize=False, add_generation_prompt=True
+                        )
+
+                        processed = processor(
+                            text=formatted_prompt,
+                            images=[image],
+                            return_tensors="pt",
+                        )
+                        # Move to correct device
+                        vision_inputs = {k: v.to(self.device) for k, v in processed.items()}
+                        logger.info("Vision tokenization successful with AutoProcessor and chat template")
+                    except Exception as e0:
+                        logger.debug(f"AutoProcessor approach failed: {e0}")
                     
                     # Approach 1: Try with AutoImageProcessor
                     try:
@@ -428,14 +465,26 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 # Strategy 1: Try with simple generation (most reliable)
                 try:
                     logger.info("Trying simple generation strategy")
-                    outputs = self.model.generate(
-                        input_ids=inputs.get('input_ids'),
-                        max_new_tokens=256,
-                        do_sample=False,
-                        pad_token_id=self.tokenizer.eos_token_id,
-                        use_cache=False,
-                        return_dict_in_generate=False
-                    )
+                    if 'pixel_values' in inputs:
+                        # Vision model requires vision tensors passed through
+                        outputs = self.model.generate(
+                            **inputs,
+                            max_new_tokens=256,
+                            do_sample=False,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            use_cache=False,
+                            return_dict_in_generate=False
+                        )
+                    else:
+                        outputs = self.model.generate(
+                            input_ids=inputs.get('input_ids'),
+                            attention_mask=inputs.get('attention_mask'),
+                            max_new_tokens=256,
+                            do_sample=False,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            use_cache=False,
+                            return_dict_in_generate=False
+                        )
                     generation_success = True
                     logger.info("Simple generation successful")
                 except Exception as e:
@@ -445,15 +494,25 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 if not generation_success:
                     try:
                         logger.info("Trying basic generation strategy")
-                        outputs = self.model.generate(
-                            input_ids=inputs.get('input_ids'),
-                            attention_mask=inputs.get('attention_mask'),
-                            max_new_tokens=256,
-                            temperature=0.7,
-                            do_sample=True,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                            use_cache=False
-                        )
+                        if 'pixel_values' in inputs:
+                            outputs = self.model.generate(
+                                **inputs,
+                                max_new_tokens=256,
+                                temperature=0.7,
+                                do_sample=True,
+                                pad_token_id=self.tokenizer.eos_token_id,
+                                use_cache=False
+                            )
+                        else:
+                            outputs = self.model.generate(
+                                input_ids=inputs.get('input_ids'),
+                                attention_mask=inputs.get('attention_mask'),
+                                max_new_tokens=256,
+                                temperature=0.7,
+                                do_sample=True,
+                                pad_token_id=self.tokenizer.eos_token_id,
+                                use_cache=False
+                            )
                         generation_success = True
                         logger.info("Basic generation successful")
                     except Exception as e:
