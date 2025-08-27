@@ -288,17 +288,21 @@ class DistributedAPKTester:
             return self._generate_random_action()
     
     def _generate_random_action(self) -> dict:
-        """Generate a random action."""
+        """Generate a random action with improved coordinate selection."""
         import random
         
         action_types = ["tap", "swipe", "keyevent"]
         action_type = random.choice(action_types)
         
         if action_type == "tap":
+            # Use more intelligent coordinate ranges
+            # Avoid status bar (top 100px) and navigation bar (bottom 200px)
             return {
                 "type": "tap",
-                "x": random.randint(100, 800),
-                "y": random.randint(200, 1200)
+                "x": random.randint(150, 850),  # Avoid screen edges
+                "y": random.randint(200, 1000),  # Avoid status and navigation bars
+                "reasoning": "Smart random fallback - avoiding system UI areas",
+                "source": "improved_random"
             }
         elif action_type == "swipe":
             return {
