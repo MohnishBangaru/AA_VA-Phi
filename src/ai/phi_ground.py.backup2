@@ -322,51 +322,6 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                         except Exception as e2:
                             logger.debug(f"Model image processor approach failed: {e2}")
                             
-                            # Approach 3: Phi-3 Manual Processing (confirmed working)
-                            try:
-                                import torchvision.transforms as transforms
-                                
-                                # Phi-3 specific image size (336x336)
-                                target_size = (336, 336)
-                                image_resized = image.resize(target_size)
-                                
-                                # Convert to tensor with ImageNet normalization
-                                transform = transforms.Compose([
-                                    transforms.ToTensor(),
-                                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                                ])
-                                
-                                image_tensor = transform(image_resized).unsqueeze(0)
-                                
-                                # Create text inputs
-                                vision_inputs = self.tokenizer(
-                                    prompt,
-                                    return_tensors="pt",
-                                    padding=True,
-                                    truncation=True
-                                )
-                                
-                                # Add image tensor as pixel_values (confirmed working)
-                                vision_inputs['pixel_values'] = image_tensor.to(self.device)
-                                logger.info("Vision tokenization successful with Phi-3 manual processing")
-                            except Exception as e3:
-                                logger.debug(f"Phi-3 manual processing approach failed: {e3}")
-                                
-                                # Approach 4: Phi-3 Direct Images Parameter
-                                try:
-                                    vision_inputs = self.tokenizer(
-                                        prompt,
-                                        images=image,
-                                        return_tensors="pt",
-                                        padding=True,
-                                        truncation=True
-                                    )
-                                    # Move to correct device
-                                    vision_inputs = {k: v.to(self.device) for k, v in vision_inputs.items()}
-                                    logger.info("Vision tokenization successful with Phi-3 direct images")
-                                except Exception as e4:
-                                    logger.debug(f"Phi-3 direct images approach failed: {e4}")
-                                                
                             # Approach 3: Try direct images parameter
                             try:
                                 vision_inputs = self.tokenizer(

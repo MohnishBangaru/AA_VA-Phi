@@ -45,7 +45,7 @@ class EnhancedDeviceManager:
         self._is_connected = False
         self._lock = asyncio.Lock()
         # Track last known resumed activity for faster recovery
-        self._last_activity: str | None = None
+        self._last_activity: Optional[str] = None
         
     async def connect_device(self, device_serial: Optional[str] = None) -> bool:
         """Connect to Android device or emulator with enhanced error handling.
@@ -499,11 +499,11 @@ class EnhancedDeviceManager:
         """Get device information."""
         return self.device_info
     
-    async def get_foreground_package(self) -> str | None:
+    async def get_foreground_package(self) -> Optional[str]:
         """Get the package name of the currently foreground app.
         
         Returns:
-            str | None: Package name of foreground app, or None if not found
+            Optional[str]: Package name of foreground app, or None if not found
         """
         if not self._is_connected or not self.device:
             return None
@@ -559,7 +559,7 @@ class EnhancedDeviceManager:
             log.error(f"Error getting foreground package: {e}")
             return None
 
-    def get_last_foreground_activity(self, package: str) -> str | None:
+    def get_last_foreground_activity(self, package: str) -> Optional[str]:
         """Return last known activity for given package."""
         if self._last_activity and self.device_info and self.device_info.serial:
             return f"{package}/{self._last_activity}"
@@ -763,7 +763,7 @@ class EnhancedDeviceManager:
             log.error(f"Foreground service setup error: {e}")
             return False
 
-    async def _create_foreground_service_apk(self, target_package: str) -> str | None:
+    async def _create_foreground_service_apk(self, target_package: str) -> Optional[str]:
         """Create a simple foreground service APK for the target app.
         
         Args:

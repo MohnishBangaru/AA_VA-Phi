@@ -1,6 +1,7 @@
 """Configuration management for the DroidBot-GPT framework."""
 
 import os
+from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import Field
@@ -52,7 +53,7 @@ class Config(BaseSettings):
 
     # OCR Engine
     # Path to the Tesseract OCR binary (leave None to use system PATH)
-    tesseract_cmd: str | None = Field(default=None, description="Path to Tesseract executable")
+    tesseract_cmd: Optional[str] = Field(default=None, description="Path to Tesseract executable")
 
     # Framework Configuration
     log_level: str = Field(default="INFO")
