@@ -49,7 +49,7 @@ class OMniParserIntegration:
             from transformers import (
                 AutoProcessor, 
                 AutoTokenizer, 
-                AutoModelForVisionTextGeneration,
+                AutoModel,
                 AutoImageProcessor
             )
             
@@ -68,7 +68,7 @@ class OMniParserIntegration:
             )
             
             # Load model
-            self.model = AutoModelForVisionTextGeneration.from_pretrained(
+            self.model = AutoModel.from_pretrained(
                 self.model_name,
                 torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
                 device_map=self.device,
@@ -155,13 +155,21 @@ class OMniParserIntegration:
             # Generate analysis
             logger.info("🔍 Running OmniParser 2.0 analysis...")
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=1024,
-                    do_sample=False,
-                    temperature=0.1,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
+                # For AutoModel, we need to use the model's generate method if available
+                if hasattr(self.model, 'generate'):
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=1024,
+                        do_sample=False,
+                        temperature=0.1,
+                        pad_token_id=self.tokenizer.eos_token_id
+                    )
+                else:
+                    # Fallback: use forward pass and decode
+                    outputs = self.model(**inputs)
+                    # Extract logits and generate text
+                    logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                    outputs = torch.argmax(logits, dim=-1)
             
             # Decode response
             response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -323,12 +331,20 @@ class OMniParserIntegration:
             ).to(self.device)
             
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=512,
-                    do_sample=False,
-                    temperature=0.1
-                )
+                # For AutoModel, we need to use the model's generate method if available
+                if hasattr(self.model, 'generate'):
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=512,
+                        do_sample=False,
+                        temperature=0.1
+                    )
+                else:
+                    # Fallback: use forward pass and decode
+                    outputs = self.model(**inputs)
+                    # Extract logits and generate text
+                    logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                    outputs = torch.argmax(logits, dim=-1)
             
             response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
@@ -386,12 +402,20 @@ class OMniParserIntegration:
             ).to(self.device)
             
             with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=512,
-                    do_sample=False,
-                    temperature=0.1
-                )
+                # For AutoModel, we need to use the model's generate method if available
+                if hasattr(self.model, 'generate'):
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=512,
+                        do_sample=False,
+                        temperature=0.1
+                    )
+                else:
+                    # Fallback: use forward pass and decode
+                    outputs = self.model(**inputs)
+                    # Extract logits and generate text
+                    logits = outputs.logits if hasattr(outputs, 'logits') else outputs
+                    outputs = torch.argmax(logits, dim=-1)
             
             response_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
