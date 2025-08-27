@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class OMniParserIntegration:
     """Integration with OmniParser 2.0 via Hugging Face for advanced UI analysis."""
     
-    def __init__(self, model_name: str = "microsoft/OmniParser", device: str = None):
+    def __init__(self, model_name: str = "microsoft/OmniParser-v2.0", device: str = None):
         """Initialize OmniParser 2.0 integration.
         
         Args:
@@ -53,35 +53,124 @@ class OMniParserIntegration:
                 AutoImageProcessor
             )
             
-            # Load processor (handles both text and image)
-            self.processor = AutoProcessor.from_pretrained(
-                self.model_name, 
-                trust_remote_code=True,
-                token=True
-            )
+            # Try multiple approaches for OmniParser 2.0
+            approaches = [
+                self._try_standard_loading,
+                self._try_minimal_loading,
+                self._try_direct_loading
+            ]
             
-            # Load tokenizer
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.model_name, 
-                trust_remote_code=True,
-                token=True
-            )
+            for i, approach in enumerate(approaches, 1):
+                try:
+                    logger.info(f"🧪 Trying approach {i} for OmniParser 2.0...")
+                    if approach():
+                        logger.info(f"✅ OmniParser 2.0 model loaded successfully on {self.device}")
+                        return True
+                except Exception as e:
+                    logger.warning(f"⚠️  Approach {i} failed: {e}")
+                    continue
             
-            # Load model
-            self.model = AutoModel.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
-                device_map=self.device,
-                trust_remote_code=True,
-                token=True
-            )
-            
-            logger.info(f"✅ OmniParser 2.0 model loaded successfully on {self.device}")
-            return True
+            logger.error("❌ All approaches failed to load OmniParser 2.0 model")
+            return False
             
         except Exception as e:
             logger.error(f"❌ Failed to load OmniParser 2.0 model: {e}")
             return False
+    
+    def _try_standard_loading(self) -> bool:
+        """Try standard loading approach."""
+        from transformers import AutoProcessor, AutoTokenizer, AutoModel
+        
+        # Load processor
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True
+        )
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True
+        )
+        
+        # Load model
+        self.model = AutoModel.from_pretrained(
+            self.model_name,
+            torch_dtype=torch.float16 if self.device == 'cuda' else torch.float32,
+            device_map=self.device,
+            trust_remote_code=True,
+            token=True
+        )
+        
+        return True
+    
+    def _try_minimal_loading(self) -> bool:
+        """Try minimal loading approach."""
+        from transformers import AutoProcessor, AutoTokenizer, AutoModel
+        
+        # Load with minimal parameters
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True,
+            local_files_only=False
+        )
+        
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True,
+            local_files_only=False
+        )
+        
+        self.model = AutoModel.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            token=True,
+            local_files_only=False
+        )
+        
+        # Move to device manually
+        self.model = self.model.to(self.device)
+        
+        return True
+    
+    def _try_direct_loading(self) -> bool:
+        """Try direct loading approach."""
+        from transformers import AutoProcessor, AutoTokenizer, AutoModel
+        
+        # Force download and cache
+        import os
+        os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+        
+        # Load with force download
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True,
+            force_download=True
+        )
+        
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, 
+            trust_remote_code=True,
+            token=True,
+            force_download=True
+        )
+        
+        self.model = AutoModel.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            token=True,
+            force_download=True
+        )
+        
+        # Move to device manually
+        self.model = self.model.to(self.device)
+        
+        return True
     
     def _check_hf_login(self) -> bool:
         """Check if user is logged in to Hugging Face Hub."""
