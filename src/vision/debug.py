@@ -6,7 +6,7 @@ import os
 
 import cv2  # type: ignore
 
-from core.config import config
+from ..core.config import config
 from .models import UIElement
 
 

@@ -11,7 +11,7 @@ import cv2  # type: ignore
 import numpy as np  # type: ignore
 from loguru import logger
 
-from core.config import config
+from ..core.config import config
 from .models import BoundingBox, UIElement
 
 

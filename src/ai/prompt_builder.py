@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.state_serializer import serialize_state
+from ..core.state_serializer import serialize_state
 
 _SYSTEM_PROMPT = (
     "You are \"AppCritic-GPT\", a senior mobile-app reviewer and UI automation expert "

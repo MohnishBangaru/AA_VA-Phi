@@ -33,8 +33,8 @@ except ImportError:
     TORCHVISION_AVAILABLE = False
     transforms = None
 
-from core.config import config
-from vision.models import UIElement, BoundingBox
+from ..core.config import config
+from ..vision.models import UIElement, BoundingBox
 
 
 class PhiGroundActionGenerator:

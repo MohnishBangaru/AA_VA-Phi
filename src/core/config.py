@@ -49,15 +49,10 @@ class Config(BaseSettings):
     cv_screenshot_quality: int = Field(default=90)
     cv_max_retries: int = Field(default=3)
     use_fast_screencap: bool = Field(default=True)  # Use adb exec-out screencap for fast capture
-    use_ocr: bool = Field(default=True)  # Toggle OCR usage (OmniParser v2 or Tesseract)
+    use_ocr: bool = Field(default=True)  # Toggle Tesseract OCR usage
 
-    # OCR Engine Configuration
-    use_omniparser_v2: bool = Field(default=True, description="Use OmniParser v2 instead of Tesseract")
-    omniparser_v2_model: str = Field(default="microsoft/omniparser-v2-base", description="OmniParser v2 model name")
-    use_gpu: bool = Field(default=True, description="Use GPU for OmniParser v2 if available")
-    
-    # Legacy Tesseract Configuration (fallback)
-    tesseract_cmd: Optional[str] = Field(default=None, description="Path to Tesseract executable (fallback)")
+    # OCR Engine
+    # Path to the Tesseract OCR binary (leave None to use system PAT    tesseract_cmd: Optional[str] = Field(default=None, description="Path to Tesseract executable")
 
     # Framework Configuration
     log_level: str = Field(default="INFO")
