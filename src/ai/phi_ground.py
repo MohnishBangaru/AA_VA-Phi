@@ -33,8 +33,8 @@ except ImportError:
     TORCHVISION_AVAILABLE = False
     transforms = None
 
-from ..core.config import config
-from ..vision.models import UIElement, BoundingBox
+from core.config import config
+from vision.models import UIElement, BoundingBox
 
 
 class PhiGroundActionGenerator:
@@ -69,6 +69,11 @@ class PhiGroundActionGenerator:
             self.debug_mode = False
         # Chat style: "strict" (system+user) or "example" (user, assistant, user)
         self.chat_style = os.getenv("PHI_GROUND_CHAT_STYLE", "strict").strip().lower()
+        
+        # Track recent actions to detect and prevent repetition
+        self.recent_actions = []
+        self.max_recent_actions = 5
+        self.repetition_threshold = 3  # Number of similar actions before considering stuck
         
     async def initialize(self) -> None:
         """Initialize the Phi Ground model."""
@@ -558,7 +563,6 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 # Prepare generation args dict matching the example
                 generation_args = {
                     "max_new_tokens": 256,
-                    "temperature": 0.0,
                     "do_sample": False,
                 }
 
@@ -575,81 +579,65 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     logger.debug(f"Failed to log input shapes/devices: {_log_err}")
                     gen_keys, gen_shapes, gen_devices = None, None, None
                 
-                # Strategy 1: Prefer full vision generation first when pixel_values are present
+                # Strategy 1: Simple generation without cache (most compatible)
                 try:
-                    if 'pixel_values' in inputs:
-                        logger.info("Trying vision generation (preferred)")
-                        # Get eos_token_id from processor if available
-                        eos_id = None
-                        try:
-                            eos_id = processor_for_decode.tokenizer.eos_token_id if 'processor_for_decode' in locals() and processor_for_decode is not None else self.tokenizer.eos_token_id
-                        except Exception:
-                            eos_id = self.tokenizer.eos_token_id
-                        # Generate using the example pattern
-                        generate_ids = self.model.generate(
-                            **inputs,
-                            eos_token_id=eos_id,
-                            **generation_args
-                        )
-                    else:
-                        logger.info("Trying simple text generation")
+                    logger.info("Trying simple generation without cache")
+                    # Get eos_token_id from processor if available
+                    eos_id = None
+                    try:
+                        eos_id = processor_for_decode.tokenizer.eos_token_id if 'processor_for_decode' in locals() and processor_for_decode is not None else self.tokenizer.eos_token_id
+                    except Exception:
                         eos_id = self.tokenizer.eos_token_id
-                        generate_ids = self.model.generate(
-                            **inputs,
-                            eos_token_id=eos_id,
-                            **generation_args
-                        )
+                    
+                    # Generate using minimal args to avoid cache issues
+                    generate_ids = self.model.generate(
+                        **inputs,
+                        eos_token_id=eos_id,
+                        use_cache=False,  # Disable cache to avoid DynamicCache issues
+                        **generation_args
+                    )
                     generation_success = True
-                    logger.info("Generation successful")
+                    logger.info("Simple generation successful")
                 except Exception as e:
-                    logger.warning(f"Preferred generation failed: {e}")
+                    logger.warning(f"Simple generation failed: {e}")
                 
-                # Strategy 2: Try with basic parameters
+                # Strategy 2: Try with even more minimal args
                 if not generation_success:
                     try:
-                        logger.info("Trying basic generation strategy")
-                        # Fallback generation args
-                        fallback_args = {
-                            "max_new_tokens": 256,
-                            "temperature": 0.7,
-                            "do_sample": True,
-                        }
-                        if 'pixel_values' in inputs:
-                            eos_id = None
-                            try:
-                                eos_id = processor_for_decode.tokenizer.eos_token_id if 'processor_for_decode' in locals() and processor_for_decode is not None else self.tokenizer.eos_token_id
-                            except Exception:
-                                eos_id = self.tokenizer.eos_token_id
-                            generate_ids = self.model.generate(
-                                **inputs,
-                                eos_token_id=eos_id,
-                                **fallback_args
-                            )
-                        else:
-                            eos_id = self.tokenizer.eos_token_id
-                            generate_ids = self.model.generate(
-                                **inputs,
-                                eos_token_id=eos_id,
-                                **fallback_args
-                            )
-                        generation_success = True
-                        logger.info("Basic generation successful")
-                    except Exception as e:
-                        logger.warning(f"Basic generation failed: {e}")
-                
-                # Strategy 3: Try with full parameters (least reliable)
-                if not generation_success:
-                    try:
-                        logger.info("Trying full generation strategy")
+                        logger.info("Trying minimal generation args")
                         generate_ids = self.model.generate(
                             **inputs,
-                            eos_token_id=self.tokenizer.eos_token_id,
-                            **fallback_args
+                            max_new_tokens=256,
+                            use_cache=False,
+                            pad_token_id=self.tokenizer.eos_token_id,
                         )
                         generation_success = True
-                        logger.info("Full generation successful")
+                        logger.info("Minimal generation successful")
                     except Exception as e:
-                        logger.warning(f"Full generation failed: {e}")
+                        logger.warning(f"Minimal generation failed: {e}")
+                
+                # Strategy 3: Try with only essential inputs
+                if not generation_success:
+                    try:
+                        logger.info("Trying essential inputs only")
+                        essential_inputs = {}
+                        if 'input_ids' in inputs:
+                            essential_inputs['input_ids'] = inputs['input_ids']
+                        if 'attention_mask' in inputs:
+                            essential_inputs['attention_mask'] = inputs['attention_mask']
+                        if 'pixel_values' in inputs:
+                            essential_inputs['pixel_values'] = inputs['pixel_values']
+                        
+                        generate_ids = self.model.generate(
+                            **essential_inputs,
+                            max_new_tokens=256,
+                            use_cache=False,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                        )
+                        generation_success = True
+                        logger.info("Essential inputs generation successful")
+                    except Exception as e:
+                        logger.warning(f"Essential inputs generation failed: {e}")
                 
                 # Strategy 4: Ultimate fallback - direct forward pass
                 if not generation_success:
@@ -706,108 +694,17 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             # Extract action from response
             action = self._parse_phi_ground_response(cleaned_response, ui_elements)
 
-            # Retry once if refusal/unstructured output detected
-            def _looks_like_refusal(text: str) -> bool:
-                t = text.lower()
-                return any(
-                    phrase in t for phrase in [
-                        "can't assist", "cannot assist", "can't help", "cannot help",
-                        "i'm sorry", "i cannot", "i can't", "refuse", "policy"
-                    ]
-                )
+            # Check for repeated actions (stuck behavior)
+            if action and self._is_repeated_action(action):
+                logger.warning(f"Detected repeated action at coordinates ({action.get('x')}, {action.get('y')}), using fallback")
+                fallback_action = self._get_fallback_action(ui_elements, task_description)
+                if fallback_action:
+                    action = fallback_action
+                    logger.info(f"Using fallback action: {fallback_action.get('type')} - {fallback_action.get('reasoning', '')}")
 
-            retry_needed = False
-            if _looks_like_refusal(cleaned_response) or not action or (
-                action.get("type") == "wait" and isinstance(action.get("reasoning"), str) and action.get("reasoning", "").lower().startswith("no valid action parsed")
-            ):
-                retry_needed = True
+            # Add action to history for future repetition detection
+            self._add_action_to_history(action)
 
-            if retry_needed:
-                try:
-                    logger.info("Retrying Phi Ground with stricter instruction due to refusal/unstructured output")
-                    if self.vision_supported:
-                        from transformers import AutoProcessor
-                        processor = AutoProcessor.from_pretrained(
-                            self.model_name,
-                            trust_remote_code=True,
-                            token=self.hf_token,
-                        )
-                        stricter_rules = (
-                            "Return exactly one line in one of these formats ONLY.\n"
-                            "1. TAP: [description] at coordinates (x, y)\n"
-                            "1. INPUT: \"text\" into [field] at coordinates (x, y)\n"
-                            "1. SWIPE: from (x1, y1) to (x2, y2)\n"
-                            "1. WAIT: 2 seconds\n"
-                            "No extra words. If unclear, choose WAIT."
-                        )
-                        messages2 = [
-                            {"role": "system", "content": stricter_rules},
-                            {"role": "user", "content": "<|image_1|>\n" + (f"Task: {task_description}" if task_description else "")}
-                        ]
-                        formatted_prompt2 = processor.tokenizer.apply_chat_template(
-                            messages2, tokenize=False, add_generation_prompt=True
-                        )
-                        processed2 = processor(
-                            text=formatted_prompt2,
-                            images=[image],
-                            return_tensors="pt",
-                        )
-                        inputs2 = {k: v.to(self.device) for k, v in processed2.items()}
-                        with torch.no_grad():
-                            outputs2 = self.model.generate(
-                                **inputs2,
-                                max_new_tokens=128,
-                                do_sample=False,
-                                pad_token_id=self.tokenizer.eos_token_id,
-                                use_cache=False,
-                                return_dict_in_generate=False
-                            )
-                        response2 = self.tokenizer.decode(outputs2[0], skip_special_tokens=True)
-                        cleaned2 = self._clean_response(response2)
-                        action2 = self._parse_phi_ground_response(cleaned2, ui_elements)
-                        if action2:
-                            action = action2
-                            response = response2
-                            cleaned_response = cleaned2
-                            logger.info("Strict retry succeeded with a parseable action")
-                    else:
-                        strict_text_prompt = (
-                            "You must output exactly one action.\n"
-                            "1. TAP: [element] at coordinates (x, y)\n"
-                            "1. INPUT: \"text\" into [field] at coordinates (x, y)\n"
-                            "1. SWIPE: from (x1, y1) to (x2, y2)\n"
-                            "1. WAIT: 2 seconds\n"
-                            "No extra words. If unclear, choose WAIT.\n\n"
-                            f"Task: {task_description}"
-                        )
-                        inputs2 = self.tokenizer(
-                            strict_text_prompt,
-                            return_tensors="pt",
-                            padding=True,
-                            truncation=True
-                        )
-                        inputs2 = {k: v.to(self.device) for k, v in inputs2.items()}
-                        with torch.no_grad():
-                            outputs2 = self.model.generate(
-                                input_ids=inputs2.get('input_ids'),
-                                attention_mask=inputs2.get('attention_mask'),
-                                max_new_tokens=128,
-                                do_sample=False,
-                                pad_token_id=self.tokenizer.eos_token_id,
-                                use_cache=False,
-                                return_dict_in_generate=False
-                            )
-                        response2 = self.tokenizer.decode(outputs2[0], skip_special_tokens=True)
-                        cleaned2 = self._clean_response(response2)
-                        action2 = self._parse_phi_ground_response(cleaned2, ui_elements)
-                        if action2:
-                            action = action2
-                            response = response2
-                            cleaned_response = cleaned2
-                            logger.info("Strict retry (text-only) succeeded with a parseable action")
-                except Exception as retry_err:
-                    logger.warning(f"Strict retry failed: {retry_err}")
-            
             if action:
                 logger.info(f"Phi Ground generated action: {action['type']} - {action.get('reasoning', '')}")
 
@@ -837,6 +734,11 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     )
             else:
                 logger.warning(f"No valid action parsed from response: {response[:200]}...")
+                # Try fallback when no action is parsed
+                fallback_action = self._get_fallback_action(ui_elements, task_description)
+                if fallback_action:
+                    action = fallback_action
+                    logger.info(f"Using fallback action due to parse failure: {fallback_action.get('type')} - {fallback_action.get('reasoning', '')}")
             
             # Always save full trace when debug mode is enabled
             if self.debug_mode:
@@ -1222,6 +1124,191 @@ Please analyze this Android app screenshot and suggest the next touch action to 
         
         return True
 
+    def _is_repeated_action(self, action: Dict[str, Any]) -> bool:
+        """Check if the action is similar to recent actions (indicating stuck behavior).
+        
+        Args:
+            action: Current action to check
+            
+        Returns:
+            True if action is repeated, False otherwise
+        """
+        if not action or action.get("type") != "tap":
+            return False
+            
+        current_x = action.get("x")
+        current_y = action.get("y")
+        current_text = action.get("element_text", "")
+        
+        if current_x is None or current_y is None:
+            return False
+            
+        # Check for coordinate repetition (within small tolerance)
+        coord_tolerance = 50  # pixels
+        similar_coord_count = 0
+        
+        for recent_action in self.recent_actions:
+            if recent_action.get("type") == "tap":
+                recent_x = recent_action.get("x")
+                recent_y = recent_action.get("y")
+                if (recent_x is not None and recent_y is not None and
+                    abs(current_x - recent_x) <= coord_tolerance and
+                    abs(current_y - recent_y) <= coord_tolerance):
+                    similar_coord_count += 1
+                    
+        return similar_coord_count >= self.repetition_threshold
+
+    def _add_action_to_history(self, action: Dict[str, Any]) -> None:
+        """Add action to recent history for repetition detection.
+        
+        Args:
+            action: Action to add to history
+        """
+        if action:
+            self.recent_actions.append(action)
+            # Keep only the most recent actions
+            if len(self.recent_actions) > self.max_recent_actions:
+                self.recent_actions.pop(0)
+
+    def _get_fallback_action(self, ui_elements: List[UIElement], task_description: str) -> Optional[Dict[str, Any]]:
+        """Generate a fallback action when the model is stuck or refuses.
+        
+        Args:
+            ui_elements: Available UI elements
+            task_description: Current task
+            
+        Returns:
+            Fallback action or None
+        """
+        try:
+            # Strategy 1: Look for unclicked interactive elements
+            unclicked_elements = []
+            clicked_coords = set()
+            
+            # Get coordinates of recently clicked elements
+            for recent_action in self.recent_actions:
+                if recent_action.get("type") == "tap":
+                    x, y = recent_action.get("x"), recent_action.get("y")
+                    if x is not None and y is not None:
+                        clicked_coords.add((x, y))
+            
+            # Find elements that haven't been clicked recently
+            for element in ui_elements:
+                if element.text and element.text.strip():
+                    x1, y1, x2, y2 = element.bbox.as_tuple()
+                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                    
+                    # Check if this coordinate hasn't been clicked recently
+                    coord_clicked = False
+                    for clicked_x, clicked_y in clicked_coords:
+                        if abs(center_x - clicked_x) <= 50 and abs(center_y - clicked_y) <= 50:
+                            coord_clicked = True
+                            break
+                    
+                    if not coord_clicked:
+                        unclicked_elements.append({
+                            "element": element,
+                            "center_x": center_x,
+                            "center_y": center_y,
+                            "text": element.text.strip()
+                        })
+            
+            # Strategy 2: Prioritize elements based on task keywords
+            task_lower = task_description.lower() if task_description else ""
+            priority_elements = []
+            
+            for item in unclicked_elements:
+                element_text_lower = item["text"].lower()
+                priority_score = 0
+                
+                # Common action words
+                action_words = ["continue", "next", "submit", "ok", "yes", "confirm", "done", "finish", "proceed"]
+                for word in action_words:
+                    if word in element_text_lower:
+                        priority_score += 3
+                
+                # Task-specific keywords
+                for word in task_lower.split():
+                    if word in element_text_lower:
+                        priority_score += 2
+                
+                # Prefer shorter text (likely buttons)
+                if len(item["text"]) <= 20:
+                    priority_score += 1
+                
+                priority_elements.append((priority_score, item))
+            
+            # Sort by priority and return the best option
+            if priority_elements:
+                priority_elements.sort(key=lambda x: x[0], reverse=True)
+                best_item = priority_elements[0][1]
+                
+                return {
+                    "type": "tap",
+                    "x": best_item["center_x"],
+                    "y": best_item["center_y"],
+                    "element_text": best_item["text"],
+                    "reasoning": f"Fallback: unclicked element '{best_item['text']}' (priority: {priority_elements[0][0]})",
+                    "phi_ground_generated": True,
+                    "confidence": 0.6,
+                    "is_fallback": True
+                }
+            
+            # Strategy 3: If no good options, try a different area of the screen
+            if ui_elements:
+                # Find an element in a different screen region
+                screen_regions = [
+                    (0, 0, 0.5, 0.5),      # Top-left
+                    (0.5, 0, 1.0, 0.5),    # Top-right
+                    (0, 0.5, 0.5, 1.0),    # Bottom-left
+                    (0.5, 0.5, 1.0, 1.0),  # Bottom-right
+                ]
+                
+                for region in screen_regions:
+                    region_elements = []
+                    for element in ui_elements:
+                        if element.text and element.text.strip():
+                            x1, y1, x2, y2 = element.bbox.as_tuple()
+                            center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                            
+                            # Check if element is in this region
+                            if (region[0] <= center_x/1344 <= region[2] and 
+                                region[1] <= center_y/2992 <= region[3]):
+                                region_elements.append({
+                                    "element": element,
+                                    "center_x": center_x,
+                                    "center_y": center_y,
+                                    "text": element.text.strip()
+                                })
+                    
+                    if region_elements:
+                        # Pick a random element from this region
+                        import random
+                        chosen = random.choice(region_elements)
+                        return {
+                            "type": "tap",
+                            "x": chosen["center_x"],
+                            "y": chosen["center_y"],
+                            "element_text": chosen["text"],
+                            "reasoning": f"Fallback: random element in region {region}",
+                            "phi_ground_generated": True,
+                            "confidence": 0.3,
+                            "is_fallback": True
+                        }
+            
+            # Strategy 4: Ultimate fallback - wait
+            return {
+                "type": "wait",
+                "duration": 3.0,
+                "reasoning": "Fallback: no suitable unclicked elements found",
+                "phi_ground_generated": True,
+                "confidence": 0.1,
+                "is_fallback": True
+            }
+            
+        except Exception as e:
+            logger.warning(f"Fallback action generation failed: {e}")
+            return None
 
     def _save_debug_response(
         self,

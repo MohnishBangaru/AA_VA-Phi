@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from ..core.config import config
+from core.config import config
 from ..core.element_tracker import get_element_tracker
 from ..core.state_tracker import get_state_tracker
 from ..vision.models import UIElement

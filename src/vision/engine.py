@@ -6,125 +6,55 @@ import concurrent.futures
 import os
 
 import cv2  # type: ignore
-import pytesseract  # type: ignore
 from loguru import logger
 
-from ..core.config import config
-from .models import BoundingBox, UIElement
+from core.config import config
+from vision.models import BoundingBox, UIElement
+from vision.omniparser_v2 import get_omniparser_v2_engine
 
 
 class VisionEngine:
     """Analyze screenshots and return detected UI elements using OCR."""
 
-    def __init__(self, tesseract_lang: str = "eng") -> None:
-        """Initialize VisionEngine.
-
-        Parameters
-        ----------
-        tesseract_lang : str
-            Tesseract language code (default is ``"eng"``).
-
-        """
-        # If the user provided a custom tesseract cmd path, set it.
-        tesseract_cmd = os.getenv("TESSERACT_CMD")
-        if tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-        self.lang = tesseract_lang
+    def __init__(self) -> None:
+        """Initialize VisionEngine with OmniParser v2."""
         # Use a thread pool for OCR to avoid blocking event loop.
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-        # Check if OCR should be enabled and Tesseract is present
+        # Check if OCR should be enabled and OmniParser v2 is available
         self._ocr_available: bool = False
+        self._omniparser_engine = None
+        self._tesseract_available = False
+        
         if not config.use_ocr:
             logger.warning("VisionEngine: OCR disabled via configuration (USE_OCR=false)")
         else:
-            try:
-                # Try to find Tesseract in common locations
-                tesseract_paths = [
-                    "/opt/homebrew/bin/tesseract",  # macOS Homebrew
-                    "/usr/local/bin/tesseract",     # macOS/Linux
-                    "/usr/bin/tesseract",           # Linux
-                    "/usr/local/lib/python3.11/dist-packages/tesseract",  # Python packages
-                    "/usr/local/lib/python3.11/site-packages/tesseract",  # Python site-packages
-                    "/usr/lib/python3.11/dist-packages/tesseract",        # System Python packages
-                    "/usr/lib/python3.11/site-packages/tesseract",        # System Python site-packages
-                    "/opt/conda/bin/tesseract",     # Conda installation
-                    "/opt/conda/envs/*/bin/tesseract",  # Conda environments
-                    "tesseract"                     # PATH
-                ]
-                
-                tesseract_found = False
-                
-                # Add dynamic Python package directory search
-                import sys
-                for site_packages in sys.path:
-                    if 'site-packages' in site_packages or 'dist-packages' in site_packages:
-                        tesseract_paths.append(f"{site_packages}/tesseract")
-                        tesseract_paths.append(f"{site_packages}/tesseract_ocr")
-                
-                # Add conda environment paths
-                conda_prefix = os.getenv('CONDA_PREFIX')
-                if conda_prefix:
-                    tesseract_paths.append(f"{conda_prefix}/bin/tesseract")
-                
-                for path in tesseract_paths:
-                    try:
-                        # Handle wildcard paths for conda environments
-                        if '*' in path:
-                            import glob
-                            expanded_paths = glob.glob(path)
-                            for expanded_path in expanded_paths:
-                                try:
-                                    pytesseract.pytesseract.tesseract_cmd = expanded_path
-                                    pytesseract.get_tesseract_version()
-                                    logger.info(f"VisionEngine: Tesseract found at {expanded_path}")
-                                    tesseract_found = True
-                                    break
-                                except Exception:
-                                    continue
-                            if tesseract_found:
-                                break
-                        else:
-                            pytesseract.pytesseract.tesseract_cmd = path
-                            pytesseract.get_tesseract_version()
-                            logger.info(f"VisionEngine: Tesseract found at {path}")
-                            tesseract_found = True
-                            break
-                    except Exception:
-                        continue
-                
-                if tesseract_found:
+            # Try OmniParser v2 first if enabled
+            if config.use_omniparser_v2:
+                self._omniparser_engine = get_omniparser_v2_engine()
+                if self._omniparser_engine.is_available():
                     self._ocr_available = True
+                    logger.info("VisionEngine: OmniParser v2 initialized successfully")
                 else:
-                    # Try to use Python tesseract package as fallback
-                    try:
-                        import tesseract
-                        logger.info("VisionEngine: Using Python tesseract package as fallback")
-                        self._ocr_available = True
-                        # Set a dummy path for pytesseract
-                        pytesseract.pytesseract.tesseract_cmd = "python_tesseract_fallback"
-                    except (ImportError, SyntaxError):
-                        try:
-                            import tesseract_ocr
-                            logger.info("VisionEngine: Using Python tesseract_ocr package as fallback")
-                            self._ocr_available = True
-                            # Set a dummy path for pytesseract
-                            pytesseract.pytesseract.tesseract_cmd = "python_tesseract_ocr_fallback"
-                        except (ImportError, SyntaxError):
-                            logger.warning(
-                                "VisionEngine: Tesseract not found in common locations. OCR will be skipped."
-                            )
-                    
-            except Exception as exc:
-                logger.warning(
-                    f"VisionEngine: Unexpected error checking Tesseract ({exc}). OCR disabled."
-                )
+                    logger.warning("VisionEngine: OmniParser v2 not available, trying Tesseract fallback")
+            
+            # Fallback to Tesseract if OmniParser v2 is not available or disabled
+            if not self._ocr_available:
+                try:
+                    import pytesseract
+                    pytesseract.get_tesseract_version()
+                    self._tesseract_available = True
+                    self._ocr_available = True
+                    logger.info("VisionEngine: Tesseract fallback initialized successfully")
+                except Exception as e:
+                    logger.warning(f"VisionEngine: Tesseract fallback not available: {e}")
+                    logger.warning("VisionEngine: No OCR engine available. OCR will be skipped.")
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def analyze(self, image_path: str) -> list[UIElement]:
-        """Return list of detected `UIElement` objects from the screenshot."""
+        """Return list of detected `UIElement` objects from the screenshot using OmniParser v2."""
         if not self._ocr_available:
             return []  # OCR disabled, return empty list
 
@@ -132,58 +62,31 @@ class VisionEngine:
             logger.error(f"Screenshot not found: {image_path}")
             return []
 
+        # Use OmniParser v2 or Tesseract for text extraction
+        elements = []
+        if self._omniparser_engine and self._omniparser_engine.is_available():
+            try:
+                elements = self._omniparser_engine.analyze(image_path)
+                logger.debug(f"OmniParser v2 detected {len(elements)} text elements")
+            except Exception as e:
+                logger.error(f"OmniParser v2 analysis failed: {e}")
+                elements = []
+        elif self._tesseract_available:
+            try:
+                elements = self._run_tesseract_analysis(image_path)
+                logger.debug(f"Tesseract detected {len(elements)} text elements")
+            except Exception as e:
+                logger.error(f"Tesseract analysis failed: {e}")
+                elements = []
+
+        # Load image for additional processing
         image = cv2.imread(image_path)
         if image is None:
             logger.error(f"Failed to load image: {image_path}")
-            return []
+            return elements
 
-        # Pre-process: convert to grayscale, optional resize for speed
+        # Pre-process: convert to grayscale for template matching
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # Simple threshold to improve OCR contrast
-        _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-
-        # Run OCR asynchronously
-        try:
-            future = self._executor.submit(
-                pytesseract.image_to_data,
-                thresh,
-                lang=self.lang,
-                output_type=pytesseract.Output.DICT,
-            )
-            ocr_data = future.result()
-        except Exception as e:
-            # Fallback to Python tesseract package if pytesseract fails
-            logger.warning(f"pytesseract failed: {e}, trying Python tesseract fallback")
-            try:
-                import tesseract
-                # Use Python tesseract package directly
-                ocr_data = self._run_python_tesseract_fallback(thresh)
-            except (ImportError, SyntaxError):
-                try:
-                    import tesseract_ocr
-                    ocr_data = self._run_python_tesseract_ocr_fallback(thresh)
-                except (ImportError, SyntaxError):
-                    logger.error("All OCR methods failed")
-                    return []
-
-        elements: list[UIElement] = []
-        n_boxes = len(ocr_data["level"])
-        for i in range(n_boxes):
-            text = ocr_data["text"][i].strip()
-            conf = float(ocr_data["conf"][i])
-            if not text or conf < 0:
-                continue  # skip empty / low confidence entries
-            x, y, w, h = (
-                ocr_data["left"][i],
-                ocr_data["top"][i],
-                ocr_data["width"][i],
-                ocr_data["height"][i],
-            )
-            bbox = BoundingBox(x, y, x + w, y + h)
-            elements.append(UIElement(bbox=bbox, text=text, confidence=conf / 100.0))
-
-        logger.debug(f"VisionEngine detected {len(elements)} text elements")
 
         # Template matching (non-text elements)
         try:
@@ -318,66 +221,63 @@ class VisionEngine:
         
         return intersection_area / union_area if union_area > 0 else 0.0
     
-    def _run_python_tesseract_fallback(self, image) -> dict:
-        """Fallback method using Python tesseract package."""
+    def _run_tesseract_analysis(self, image_path: str) -> list[UIElement]:
+        """Run Tesseract OCR analysis on the image.
+        
+        Args:
+            image_path: Path to the image
+            
+        Returns:
+            List of UIElement objects
+        """
         try:
-            import tesseract
-            # Convert image to format expected by Python tesseract
-            import numpy as np
-            from PIL import Image
+            import pytesseract
             
-            # Convert OpenCV image to PIL
-            if len(image.shape) == 3:
-                image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            else:
-                image_pil = Image.fromarray(image)
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                return []
             
-            # Use Python tesseract package
-            result = tesseract.image_to_data(image_pil, output_type=tesseract.Output.DICT)
-            return result
-        except (ImportError, SyntaxError) as e:
-            logger.error(f"Python tesseract package has syntax error or import issue: {e}")
-            # Return empty result structure
-            return {
-                "level": [], "left": [], "top": [], "width": [], "height": [],
-                "text": [], "conf": []
-            }
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Apply threshold for better text detection
+            _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+            
+            # Run OCR
+            ocr_data = pytesseract.image_to_data(
+                thresh,
+                lang='eng',
+                output_type=pytesseract.Output.DICT
+            )
+            
+            # Process results
+            elements = []
+            n_boxes = len(ocr_data["level"])
+            for i in range(n_boxes):
+                text = ocr_data["text"][i].strip()
+                conf = float(ocr_data["conf"][i])
+                
+                if text and conf > 0:
+                    x, y, w, h = (
+                        ocr_data["left"][i],
+                        ocr_data["top"][i],
+                        ocr_data["width"][i],
+                        ocr_data["height"][i],
+                    )
+                    bbox = BoundingBox(x, y, x + w, y + h)
+                    element = UIElement(
+                        bbox=bbox,
+                        text=text,
+                        confidence=conf / 100.0,
+                        element_type="text"
+                    )
+                    elements.append(element)
+            
+            return elements
+            
         except Exception as e:
-            logger.error(f"Python tesseract fallback failed: {e}")
-            # Return empty result structure
-            return {
-                "level": [], "left": [], "top": [], "width": [], "height": [],
-                "text": [], "conf": []
-            }
+            logger.error(f"Tesseract analysis failed: {e}")
+            return []
     
-    def _run_python_tesseract_ocr_fallback(self, image) -> dict:
-        """Fallback method using Python tesseract_ocr package."""
-        try:
-            import tesseract_ocr
-            # Convert image to format expected by tesseract_ocr
-            import numpy as np
-            from PIL import Image
-            
-            # Convert OpenCV image to PIL
-            if len(image.shape) == 3:
-                image_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            else:
-                image_pil = Image.fromarray(image)
-            
-            # Use tesseract_ocr package
-            result = tesseract_ocr.image_to_data(image_pil, output_type=tesseract_ocr.Output.DICT)
-            return result
-        except (ImportError, SyntaxError) as e:
-            logger.error(f"Python tesseract_ocr package has syntax error or import issue: {e}")
-            # Return empty result structure
-            return {
-                "level": [], "left": [], "top": [], "width": [], "height": [],
-                "text": [], "conf": []
-            }
-        except Exception as e:
-            logger.error(f"Python tesseract_ocr fallback failed: {e}")
-            # Return empty result structure
-            return {
-                "level": [], "left": [], "top": [], "width": [], "height": [],
-                "text": [], "conf": []
-            } 
+   

@@ -39,6 +39,11 @@ opencv-python==4.8.1.78
 pytesseract==0.3.10
 scikit-image==0.21.0
 
+# OmniParser v2 Dependencies
+transformers>=4.36.0
+torch>=2.1.0
+torchvision>=0.16.0
+
 # Resource Monitoring & Performance
 psutil==5.9.5
 memory-profiler==0.60.0

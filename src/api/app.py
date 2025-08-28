@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ..core.config import config
+from core.config import config
 from ..core.logger import log
 from .routes import automation_router, device_router, status_router
 
