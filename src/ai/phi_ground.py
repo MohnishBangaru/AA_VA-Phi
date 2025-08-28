@@ -95,7 +95,11 @@ class PhiGroundActionGenerator:
                     # Approach 2: Try with image processor from transformers
                     try:
                         from transformers import AutoImageProcessor
-                        image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                        image_processor = AutoImageProcessor.from_pretrained(
+                            self.model_name,
+                            trust_remote_code=True,
+                            token=self.hf_token,
+                        )
                         processed_image = image_processor(dummy_image, return_tensors="pt")
                         test_inputs = self.tokenizer("test", return_tensors="pt", **processed_image)
                         vision_works = True
@@ -269,7 +273,7 @@ Prioritize:
 Please analyze this Android app screenshot and suggest the next touch action to accomplish the task.
 <|im_end|>
 <|im_start|>assistant
-1. TAP: """
+1. """
         
         return prompt
     
@@ -343,7 +347,11 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     # Approach 1: Try with AutoImageProcessor
                     try:
                         from transformers import AutoImageProcessor
-                        image_processor = AutoImageProcessor.from_pretrained(self.model_name, trust_remote_code=True)
+                        image_processor = AutoImageProcessor.from_pretrained(
+                            self.model_name,
+                            trust_remote_code=True,
+                            token=self.hf_token,
+                        )
                         processed_image = image_processor(image, return_tensors="pt")
                         vision_inputs = self.tokenizer(
                             prompt,
@@ -422,6 +430,8 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                     
                                     # Fallback: Simple tensor conversion without torchvision
                                     try:
+                                        # Ensure we have a resized image available
+                                        image_resized = image.resize((224, 224))
                                         # Convert PIL image to numpy array and then to tensor
                                         image_array = np.array(image_resized)
                                         image_tensor = torch.from_numpy(image_array).float().permute(2, 0, 1).unsqueeze(0) / 255.0
@@ -429,6 +439,9 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                         logger.info("Vision tokenization successful with simple tensor conversion")
                                     except Exception as e5:
                                         logger.debug(f"Simple tensor conversion failed: {e5}")
+                                        
+                                        # If still failing, mark as None to trigger text-only fallback
+                                        vision_inputs = None
                     
                     if vision_inputs is not None:
                         inputs = vision_inputs
@@ -664,47 +677,62 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             Parsed action dictionary or None
         """
         try:
-            # Extract action from response - more flexible regex
-            action_match = re.search(r'(\d+)\.?\s*(TAP|INPUT|SWIPE|WAIT):?\s*(.+)', response, re.IGNORECASE)
-            if not action_match:
-                # Try alternative patterns
-                action_match = re.search(r'(TAP|INPUT|SWIPE|WAIT):?\s*(.+)', response, re.IGNORECASE)
-                if not action_match:
-                    # Try to find any action-like pattern
-                    action_match = re.search(r'(\d+\.\s*[A-Z]+:.*)', response, re.IGNORECASE)
-                    if not action_match:
-                        logger.warning(f"Could not parse Phi Ground response: {response[:200]}...")
-                        # Generate a default wait action if parsing fails
-                        return {
-                            "type": "wait",
-                            "duration": 2.0,
-                            "reasoning": "No valid action parsed, waiting",
-                            "phi_ground_generated": True,
-                            "confidence": 0.1
-                        }
-                    else:
-                        # Try to parse the found pattern
-                        action_text = action_match.group(1)
-                        action_type_match = re.search(r'(TAP|INPUT|SWIPE|WAIT)', action_text, re.IGNORECASE)
-                        if action_type_match:
-                            action_type = action_type_match.group(1).upper()
-                            action_description = action_text
-                        else:
-                            # Default to wait action
-                            return {
-                                "type": "wait",
-                                "duration": 2.0,
-                                "reasoning": f"Unparseable action: {action_text}",
-                                "phi_ground_generated": True,
-                                "confidence": 0.1
-                            }
-                else:
-                    # Use default number 1 if not found
-                    action_type = action_match.group(1).upper()
-                    action_description = action_match.group(2).strip()
+            # Normalize and broaden accepted action keywords
+            synonyms_map = {
+                "TAP": ["TAP", "CLICK", "PRESS", "HIT"],
+                "INPUT": ["INPUT", "TYPE", "ENTER"],
+                "SWIPE": ["SWIPE", "DRAG", "SCROLL"],
+                "WAIT": ["WAIT", "PAUSE", "SLEEP"],
+            }
+            all_keywords = [kw for keys in synonyms_map.values() for kw in keys]
+            keywords_pattern = "|".join(all_keywords)
+
+            # Primary pattern: optional leading number, action keyword (synonym), optional colon/hyphen
+            action_match = re.search(
+                rf"(?:\d+\.\s*)?({keywords_pattern})[:\-]?\s*(.+)",
+                response,
+                re.IGNORECASE,
+            )
+
+            if action_match:
+                raw_type = action_match.group(1).upper()
+                action_description = action_match.group(2).strip()
+
+                # Map to canonical action type
+                action_type = None
+                for canonical, synonyms in synonyms_map.items():
+                    if raw_type in synonyms:
+                        action_type = canonical
+                        break
+                if action_type is None:
+                    logger.warning(f"Unknown action keyword: {raw_type}")
+                    return None
             else:
-                action_type = action_match.group(2).upper()
-                action_description = action_match.group(3).strip()
+                # Heuristic fallback: infer from words present and coordinates
+                lower_resp = response.lower()
+                coords_present = re.search(r"\(\s*\d+\s*,\s*\d+\s*\)", response) is not None
+
+                if any(w in lower_resp for w in ["tap", "click", "press", "hit"]) and coords_present:
+                    action_type = "TAP"
+                    action_description = response
+                elif any(w in lower_resp for w in ["type", "enter"]) and coords_present:
+                    action_type = "INPUT"
+                    action_description = response
+                elif any(w in lower_resp for w in ["swipe", "drag", "scroll"]) and re.search(r"to\s*\(\s*\d+\s*,\s*\d+\s*\)", lower_resp):
+                    action_type = "SWIPE"
+                    action_description = response
+                elif any(w in lower_resp for w in ["wait", "pause", "sleep"]):
+                    action_type = "WAIT"
+                    action_description = response
+                else:
+                    logger.warning(f"Could not parse Phi Ground response: {response[:200]}...")
+                    return {
+                        "type": "wait",
+                        "duration": 2.0,
+                        "reasoning": "No valid action parsed, waiting",
+                        "phi_ground_generated": True,
+                        "confidence": 0.1,
+                    }
             
             if action_type == "TAP":
                 return self._parse_tap_action(action_description, ui_elements)
