@@ -17,6 +17,7 @@ import re
 import os
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+import time
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -61,6 +62,13 @@ class PhiGroundActionGenerator:
             
         self._initialized = False
         self.vision_supported = False
+        # Toggle extra debug dumps of prompts and raw VLM responses
+        try:
+            self.debug_mode = bool(int(os.getenv("PHI_GROUND_DEBUG", "0")))
+        except Exception:
+            self.debug_mode = False
+        # Chat style: "strict" (system+user) or "example" (user, assistant, user)
+        self.chat_style = os.getenv("PHI_GROUND_CHAT_STYLE", "strict").strip().lower()
         
     async def initialize(self) -> None:
         """Initialize the Phi Ground model."""
@@ -315,6 +323,11 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     
                     # Try multiple vision tokenization approaches
                     vision_inputs = None
+                    used_auto_processor = False
+                    processor_for_decode = None
+                    input_ids_len_for_decode = None
+                    formatted_prompt_str = None
+                    messages_used = None
 
                     # Approach 0: Use AutoProcessor (preferred for Phi-3 Vision)
                     try:
@@ -323,23 +336,91 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                             self.model_name,
                             trust_remote_code=True,
                             token=self.hf_token,
+                            num_crops=16,
                         )
 
-                        # Build chat template with image placeholder expected by the model
-                        messages = [
-                            {"role": "user", "content": "<|image_1|>\n" + task_description}
-                        ]
+                        # Build chat template (supports two styles)
+                        # Prepare recent actions text (last 3)
+                        history_text_parts = []
+                        try:
+                            if action_history:
+                                recent_actions_ct = action_history[-3:]
+                                for _a in recent_actions_ct:
+                                    _t = _a.get("type", "")
+                                    _et = _a.get("element_text", "")
+                                    if _et:
+                                        history_text_parts.append(f"{_t}: {_et}")
+                        except Exception:
+                            pass
+                        history_text_ct = ("Recent actions: " + ", ".join(history_text_parts)) if history_text_parts else ""
+                        if self.chat_style == "example":
+                            # Build a user-assistant-user sequence similar to reference
+                            # Assistant bridge content from UI hints (optional)
+                            visible_texts = []
+                            try:
+                                for el in ui_elements:
+                                    txt = (el.text or "").strip()
+                                    if txt and txt not in visible_texts:
+                                        visible_texts.append(txt)
+                                    if len(visible_texts) >= 5:
+                                        break
+                            except Exception:
+                                pass
+                            assistant_bridge = (
+                                "Visible elements: " + ", ".join(visible_texts)
+                            ) if visible_texts else "Okay."
+
+                            messages = [
+                                {"role": "user", "content": "<|image_1|>\n" + (f"Task: {task_description}" if task_description else "")},
+                                {"role": "assistant", "content": assistant_bridge},
+                                {"role": "user", "content": (
+                                    "Provide the next touch action as a single line: "
+                                    "1. TAP: [desc] at coordinates (x, y) | 1. INPUT: \"text\" into [field] at coordinates (x, y) | "
+                                    "1. SWIPE: from (x1, y1) to (x2, y2) | 1. WAIT: 2 seconds."
+                                )}
+                            ]
+                        else:
+                            # Default strict system+user for single-line action
+                            strict_rules = (
+                                "You must respond with exactly one action in this format:\n"
+                                "1. TAP: [element_description] at coordinates (x, y)\n"
+                                "2. INPUT: [text] into [field_description] at coordinates (x, y)\n"
+                                "3. SWIPE: from (x1, y1) to (x2, y2)\n"
+                                "4. WAIT: [duration] seconds\n\n"
+                                "Rules:\n"
+                                "- Respond with ONE line only.\n"
+                                "- Start with a number (1.).\n"
+                                "- Use the exact format above.\n"
+                                "- If no clear action, respond: 1. WAIT: 2 seconds\n"
+                                "- Do not refuse. Do not add extra text."
+                            )
+                            messages = [
+                                {"role": "system", "content": strict_rules},
+                                {
+                                    "role": "user",
+                                    "content": "<|image_1|>\n" +
+                                               (f"Task: {task_description}\n" if task_description else "") +
+                                               (history_text_ct if history_text_ct else "")
+                                }
+                            ]
                         formatted_prompt = processor.tokenizer.apply_chat_template(
                             messages, tokenize=False, add_generation_prompt=True
                         )
+                        formatted_prompt_str = formatted_prompt
+                        messages_used = messages
 
+                        # Mirror example style: processor(prompt, [image], ...)
                         processed = processor(
-                            text=formatted_prompt,
-                            images=[image],
+                            formatted_prompt,
+                            [image],
                             return_tensors="pt",
                         )
                         # Move to correct device
                         vision_inputs = {k: v.to(self.device) for k, v in processed.items()}
+                        # Mark that we used AutoProcessor for decoding later
+                        used_auto_processor = True
+                        processor_for_decode = processor
+                        input_ids_len_for_decode = vision_inputs.get('input_ids').shape[1] if 'input_ids' in vision_inputs else None
                         logger.info("Vision tokenization successful with AutoProcessor and chat template")
                     except Exception as e0:
                         logger.debug(f"AutoProcessor approach failed: {e0}")
@@ -474,6 +555,12 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             # Generate response with robust caching fixes
             with torch.no_grad():
                 generation_success = False
+                # Prepare generation args dict matching the example
+                generation_args = {
+                    "max_new_tokens": 256,
+                    "temperature": 0.0,
+                    "do_sample": False,
+                }
 
                 # Debug: log inputs present, shapes and device
                 try:
@@ -483,31 +570,34 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                     logger.info(f"Generation inputs keys: {keys}")
                     logger.info(f"Generation input shapes: {shapes}")
                     logger.info(f"Generation input devices: {devices}, model device: {self.device}")
+                    gen_keys, gen_shapes, gen_devices = keys, shapes, devices
                 except Exception as _log_err:
                     logger.debug(f"Failed to log input shapes/devices: {_log_err}")
+                    gen_keys, gen_shapes, gen_devices = None, None, None
                 
                 # Strategy 1: Prefer full vision generation first when pixel_values are present
                 try:
                     if 'pixel_values' in inputs:
                         logger.info("Trying vision generation (preferred)")
-                        outputs = self.model.generate(
+                        # Get eos_token_id from processor if available
+                        eos_id = None
+                        try:
+                            eos_id = processor_for_decode.tokenizer.eos_token_id if 'processor_for_decode' in locals() and processor_for_decode is not None else self.tokenizer.eos_token_id
+                        except Exception:
+                            eos_id = self.tokenizer.eos_token_id
+                        # Generate using the example pattern
+                        generate_ids = self.model.generate(
                             **inputs,
-                            max_new_tokens=256,
-                            do_sample=False,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                            use_cache=False,
-                            return_dict_in_generate=False
+                            eos_token_id=eos_id,
+                            **generation_args
                         )
                     else:
                         logger.info("Trying simple text generation")
-                        outputs = self.model.generate(
-                            input_ids=inputs.get('input_ids'),
-                            attention_mask=inputs.get('attention_mask'),
-                            max_new_tokens=256,
-                            do_sample=False,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                            use_cache=False,
-                            return_dict_in_generate=False
+                        eos_id = self.tokenizer.eos_token_id
+                        generate_ids = self.model.generate(
+                            **inputs,
+                            eos_token_id=eos_id,
+                            **generation_args
                         )
                     generation_success = True
                     logger.info("Generation successful")
@@ -518,24 +608,29 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 if not generation_success:
                     try:
                         logger.info("Trying basic generation strategy")
+                        # Fallback generation args
+                        fallback_args = {
+                            "max_new_tokens": 256,
+                            "temperature": 0.7,
+                            "do_sample": True,
+                        }
                         if 'pixel_values' in inputs:
-                            outputs = self.model.generate(
+                            eos_id = None
+                            try:
+                                eos_id = processor_for_decode.tokenizer.eos_token_id if 'processor_for_decode' in locals() and processor_for_decode is not None else self.tokenizer.eos_token_id
+                            except Exception:
+                                eos_id = self.tokenizer.eos_token_id
+                            generate_ids = self.model.generate(
                                 **inputs,
-                                max_new_tokens=256,
-                                temperature=0.7,
-                                do_sample=True,
-                                pad_token_id=self.tokenizer.eos_token_id,
-                                use_cache=False
+                                eos_token_id=eos_id,
+                                **fallback_args
                             )
                         else:
-                            outputs = self.model.generate(
-                                input_ids=inputs.get('input_ids'),
-                                attention_mask=inputs.get('attention_mask'),
-                                max_new_tokens=256,
-                                temperature=0.7,
-                                do_sample=True,
-                                pad_token_id=self.tokenizer.eos_token_id,
-                                use_cache=False
+                            eos_id = self.tokenizer.eos_token_id
+                            generate_ids = self.model.generate(
+                                **inputs,
+                                eos_token_id=eos_id,
+                                **fallback_args
                             )
                         generation_success = True
                         logger.info("Basic generation successful")
@@ -546,13 +641,10 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                 if not generation_success:
                     try:
                         logger.info("Trying full generation strategy")
-                        outputs = self.model.generate(
+                        generate_ids = self.model.generate(
                             **inputs,
-                            max_new_tokens=256,
-                            temperature=0.7,
-                            do_sample=True,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                            use_cache=False  # Disable cache to avoid DynamicCache issues
+                            eos_token_id=self.tokenizer.eos_token_id,
+                            **fallback_args
                         )
                         generation_success = True
                         logger.info("Full generation successful")
@@ -572,8 +664,8 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                         
                         for _ in range(256):
                             with torch.no_grad():
-                                outputs = self.model.forward(input_ids=current_input)
-                                next_token = torch.argmax(outputs.logits[:, -1, :], dim=-1)
+                                forward_outputs = self.model.forward(input_ids=current_input)
+                                next_token = torch.argmax(forward_outputs.logits[:, -1, :], dim=-1)
                                 generated_tokens.append(next_token.item())
                                 current_input = torch.cat([current_input, next_token.unsqueeze(0)], dim=1)
                                 
@@ -582,7 +674,7 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                                     break
                         
                         # Combine original input with generated tokens
-                        outputs = torch.cat([inputs.get('input_ids'), torch.tensor([generated_tokens])], dim=1)
+                        generate_ids = torch.cat([inputs.get('input_ids'), torch.tensor([generated_tokens])], dim=1)
                         generation_success = True
                         logger.info("Direct forward pass successful")
                     except Exception as e:
@@ -590,7 +682,21 @@ Please analyze this Android app screenshot and suggest the next touch action to 
                         return None
             
             # Decode response
-            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # Mirror example: trim input tokens and use processor.batch_decode
+            try:
+                if 'processor_for_decode' in locals() and processor_for_decode is not None and input_ids_len_for_decode is not None:
+                    # Remove input tokens
+                    generate_ids = generate_ids[:, inputs['input_ids'].shape[1]:]
+                    response = processor_for_decode.batch_decode(
+                        generate_ids,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False
+                    )[0]
+                else:
+                    response = self.tokenizer.decode(generate_ids[0], skip_special_tokens=True)
+            except Exception as _decode_err:
+                logger.debug(f"Processor batch_decode failed, falling back to tokenizer.decode: {_decode_err}")
+                response = self.tokenizer.decode(generate_ids[0], skip_special_tokens=True)
             logger.debug(f"Phi Ground raw response: {response}")
             
             # Clean response - remove prompt repetition
@@ -599,12 +705,160 @@ Please analyze this Android app screenshot and suggest the next touch action to 
             
             # Extract action from response
             action = self._parse_phi_ground_response(cleaned_response, ui_elements)
+
+            # Retry once if refusal/unstructured output detected
+            def _looks_like_refusal(text: str) -> bool:
+                t = text.lower()
+                return any(
+                    phrase in t for phrase in [
+                        "can't assist", "cannot assist", "can't help", "cannot help",
+                        "i'm sorry", "i cannot", "i can't", "refuse", "policy"
+                    ]
+                )
+
+            retry_needed = False
+            if _looks_like_refusal(cleaned_response) or not action or (
+                action.get("type") == "wait" and isinstance(action.get("reasoning"), str) and action.get("reasoning", "").lower().startswith("no valid action parsed")
+            ):
+                retry_needed = True
+
+            if retry_needed:
+                try:
+                    logger.info("Retrying Phi Ground with stricter instruction due to refusal/unstructured output")
+                    if self.vision_supported:
+                        from transformers import AutoProcessor
+                        processor = AutoProcessor.from_pretrained(
+                            self.model_name,
+                            trust_remote_code=True,
+                            token=self.hf_token,
+                        )
+                        stricter_rules = (
+                            "Return exactly one line in one of these formats ONLY.\n"
+                            "1. TAP: [description] at coordinates (x, y)\n"
+                            "1. INPUT: \"text\" into [field] at coordinates (x, y)\n"
+                            "1. SWIPE: from (x1, y1) to (x2, y2)\n"
+                            "1. WAIT: 2 seconds\n"
+                            "No extra words. If unclear, choose WAIT."
+                        )
+                        messages2 = [
+                            {"role": "system", "content": stricter_rules},
+                            {"role": "user", "content": "<|image_1|>\n" + (f"Task: {task_description}" if task_description else "")}
+                        ]
+                        formatted_prompt2 = processor.tokenizer.apply_chat_template(
+                            messages2, tokenize=False, add_generation_prompt=True
+                        )
+                        processed2 = processor(
+                            text=formatted_prompt2,
+                            images=[image],
+                            return_tensors="pt",
+                        )
+                        inputs2 = {k: v.to(self.device) for k, v in processed2.items()}
+                        with torch.no_grad():
+                            outputs2 = self.model.generate(
+                                **inputs2,
+                                max_new_tokens=128,
+                                do_sample=False,
+                                pad_token_id=self.tokenizer.eos_token_id,
+                                use_cache=False,
+                                return_dict_in_generate=False
+                            )
+                        response2 = self.tokenizer.decode(outputs2[0], skip_special_tokens=True)
+                        cleaned2 = self._clean_response(response2)
+                        action2 = self._parse_phi_ground_response(cleaned2, ui_elements)
+                        if action2:
+                            action = action2
+                            response = response2
+                            cleaned_response = cleaned2
+                            logger.info("Strict retry succeeded with a parseable action")
+                    else:
+                        strict_text_prompt = (
+                            "You must output exactly one action.\n"
+                            "1. TAP: [element] at coordinates (x, y)\n"
+                            "1. INPUT: \"text\" into [field] at coordinates (x, y)\n"
+                            "1. SWIPE: from (x1, y1) to (x2, y2)\n"
+                            "1. WAIT: 2 seconds\n"
+                            "No extra words. If unclear, choose WAIT.\n\n"
+                            f"Task: {task_description}"
+                        )
+                        inputs2 = self.tokenizer(
+                            strict_text_prompt,
+                            return_tensors="pt",
+                            padding=True,
+                            truncation=True
+                        )
+                        inputs2 = {k: v.to(self.device) for k, v in inputs2.items()}
+                        with torch.no_grad():
+                            outputs2 = self.model.generate(
+                                input_ids=inputs2.get('input_ids'),
+                                attention_mask=inputs2.get('attention_mask'),
+                                max_new_tokens=128,
+                                do_sample=False,
+                                pad_token_id=self.tokenizer.eos_token_id,
+                                use_cache=False,
+                                return_dict_in_generate=False
+                            )
+                        response2 = self.tokenizer.decode(outputs2[0], skip_special_tokens=True)
+                        cleaned2 = self._clean_response(response2)
+                        action2 = self._parse_phi_ground_response(cleaned2, ui_elements)
+                        if action2:
+                            action = action2
+                            response = response2
+                            cleaned_response = cleaned2
+                            logger.info("Strict retry (text-only) succeeded with a parseable action")
+                except Exception as retry_err:
+                    logger.warning(f"Strict retry failed: {retry_err}")
             
             if action:
                 logger.info(f"Phi Ground generated action: {action['type']} - {action.get('reasoning', '')}")
+
+                # If parser fell back to default wait, persist debug details
+                if (
+                    action.get("type") == "wait"
+                    and isinstance(action.get("reasoning"), str)
+                    and action.get("reasoning", "").lower().startswith("no valid action parsed")
+                ):
+                    self._save_debug_response(
+                        image_path=image_path,
+                        task_description=task_description,
+                        raw_response=response,
+                        cleaned_response=cleaned_response,
+                        action=action,
+                        extras={
+                            "model": self.model_name,
+                            "device": self.device,
+                            "vision_supported": self.vision_supported,
+                            "used_auto_processor": bool('used_auto_processor' in locals() and used_auto_processor),
+                            "input_keys": gen_keys,
+                            "input_shapes": gen_shapes,
+                            "input_devices": gen_devices,
+                            "formatted_prompt": formatted_prompt_str,
+                            "messages": messages_used,
+                        },
+                    )
             else:
                 logger.warning(f"No valid action parsed from response: {response[:200]}...")
             
+            # Always save full trace when debug mode is enabled
+            if self.debug_mode:
+                self._save_debug_response(
+                    image_path=image_path,
+                    task_description=task_description,
+                    raw_response=response,
+                    cleaned_response=cleaned_response,
+                    action=action if action else {"type": "none"},
+                    extras={
+                        "model": self.model_name,
+                        "device": self.device,
+                        "vision_supported": self.vision_supported,
+                        "used_auto_processor": bool('used_auto_processor' in locals() and used_auto_processor),
+                        "input_keys": gen_keys,
+                        "input_shapes": gen_shapes,
+                        "input_devices": gen_devices,
+                        "formatted_prompt": formatted_prompt_str,
+                        "messages": messages_used,
+                    },
+                )
+
             return action
             
         except Exception as e:
@@ -968,6 +1222,46 @@ Please analyze this Android app screenshot and suggest the next touch action to 
         
         return True
 
+
+    def _save_debug_response(
+        self,
+        image_path: str,
+        task_description: str,
+        raw_response: str,
+        cleaned_response: str,
+        action: Dict[str, Any],
+        extras: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist raw and cleaned model responses and metadata to a JSON file.
+        
+        Args:
+            image_path: Path to the screenshot used
+            task_description: The task prompt
+            raw_response: Raw decoded model output
+            cleaned_response: After cleaning/parsing prep
+            action: Parsed action (or fallback)
+            extras: Additional metadata to include
+        """
+        try:
+            logs_dir = Path("logs")
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            ts = int(time.time() * 1000)
+            debug_path = logs_dir / f"phi_ground_response_{ts}.json"
+            payload: Dict[str, Any] = {
+                "timestamp_ms": ts,
+                "image_path": image_path,
+                "task_description": task_description,
+                "raw_response": raw_response,
+                "cleaned_response": cleaned_response,
+                "action": action,
+            }
+            if extras:
+                payload["meta"] = extras
+            with open(debug_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.info(f"Saved Phi Ground debug response to {debug_path}")
+        except Exception as save_err:
+            logger.warning(f"Failed to save Phi Ground debug response: {save_err}")
 
 # Global instance for reuse
 _phi_ground_generator = None
