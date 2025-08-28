@@ -6,7 +6,7 @@ import asyncio
 import time
 from typing import Any, Dict, List, Optional, Callable
 
-from ..core.logger import log
+from core.logger import log
 
 
 class ErrorHandler:

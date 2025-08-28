@@ -10,7 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from ..vision.models import UIElement
+from vision.models import UIElement
 
 HEADER = (
     "You are a seasoned Human App Critic. You analyse mobile apps from both "

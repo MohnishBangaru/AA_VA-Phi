@@ -14,8 +14,8 @@ import psutil
 
 from Explorer.device import ADBError, Device
 
-from ..core.config import config
-from ..core.logger import log
+from core.config import config
+from core.logger import log
 
 
 @dataclass

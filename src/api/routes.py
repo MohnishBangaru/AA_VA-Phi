@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..core.explorer import Explorer
-from ..core.logger import log
+from core.explorer import Explorer
+from core.logger import log
 
 # Create router instances
 device_router = APIRouter()
